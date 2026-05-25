@@ -594,10 +594,13 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     e.stopPropagation();
     if (!user || !activeProjectId) return;
     try {
+      const targetEvent = savedEvents.find(ev => ev.eventId === eventId);
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
       await deleteDoc(eventRef);
-      if (result && (result as any).eventId === eventId) {
-        setResult(null);
+      if (targetEvent) {
+        await saveToScans(targetEvent as any);
+      }
+      if (result && ((result as any).eventId === eventId || result.eventName.toLowerCase() === targetEvent?.eventName.toLowerCase())) {
         setIsSaved(false);
       }
     } catch (err) {
@@ -923,6 +926,8 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         try {
           await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'events', savedEv.eventId));
           setIsSaved(false);
+          // Move that listing out of the Pipeline and back into the Scans list!
+          await saveToScans(result);
         } catch (e) {
           console.error("Failed to unsave event from pipeline:", e);
           alert("Failed to unsave event from pipeline");
@@ -965,6 +970,12 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         createdAt: serverTimestamp()
       });
       setIsSaved(true);
+
+      // Remove the scan from the Scan list after moving to Pipeline list (saved to events)
+      const scanInList = scannedList.find(s => s.eventName.toLowerCase() === result.eventName.toLowerCase());
+      if (scanInList) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'scans', scanInList.scanId));
+      }
     } catch (e) {
       console.error(e);
       alert("Failed to save event");
@@ -1967,7 +1978,6 @@ Pro Event Research Team`;
               <div className="flex gap-2">
                 <button 
                   onClick={handleSave}
-                  disabled={isSaved}
                   className={cn(
                     "flex items-center space-x-2 px-3 py-1.5 rounded text-[10px] font-bold border transition-all cursor-pointer",
                     isSaved ? "bg-red-500/10 text-red-500 border-red-500/20" : "bg-white/5 text-slate-400 border-white/10 hover:text-white"

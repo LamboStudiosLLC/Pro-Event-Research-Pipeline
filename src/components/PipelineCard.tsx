@@ -476,6 +476,48 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     document.body.removeChild(link);
   };
 
+  const getContainerClasses = () => {
+    const isInitial = event.status === 'Initial';
+    const isContacted = event.status === 'Contacted';
+
+    if (isInitial) {
+      // Not Started -> White
+      return isExpanded 
+        ? "border-white/70 bg-zinc-900/40 ring-2 ring-white/30 shadow-white/10" 
+        : "border-white/45 bg-[#141416] hover:border-white/65 hover:bg-[#1f1f22]";
+    } else if (isContacted) {
+      // Contacted -> Orange
+      return isExpanded 
+        ? "border-orange-500/75 bg-[#261203] ring-2 ring-orange-500/30 shadow-orange-950/70" 
+        : "border-orange-500/50 bg-[#170a01] hover:border-orange-500/70 hover:bg-[#251002]";
+    } else {
+      // Responded -> Teal (App's signature teal blue/green gradient)
+      return isExpanded 
+        ? "border-teal-500/75 bg-[#031d1a] ring-2 ring-teal-500/30 shadow-teal-950/70" 
+        : "border-teal-500/50 bg-[#021412] hover:border-teal-500/70 hover:bg-[#032521]";
+    }
+  };
+
+  const getGlowStyle = () => {
+    const isInitial = event.status === 'Initial';
+    const isContacted = event.status === 'Contacted';
+    
+    if (isInitial) {
+      return {
+        background: 'radial-gradient(circle, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.20) 45%, rgba(0, 0, 0, 0) 70%)'
+      };
+    } else if (isContacted) {
+      return {
+        background: 'radial-gradient(circle, rgba(249, 115, 22, 0.75) 0%, rgba(249, 115, 22, 0.20) 45%, rgba(0, 0, 0, 0) 70%)'
+      };
+    } else {
+      // Responded -> Teal (App's signature teal blue/green)
+      return {
+        background: 'radial-gradient(circle, rgba(20, 184, 166, 0.75) 0%, rgba(20, 184, 166, 0.20) 45%, rgba(0, 0, 0, 0) 70%)'
+      };
+    }
+  };
+
   return (
     <motion.div
       ref={cardRef}
@@ -484,13 +526,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 8 }}
       className={cn(
-        "w-full bg-[#050914]/40 border rounded-xl transition-all shadow-md select-text p-3 flex flex-col",
-        isExpanded ? "border-primary/40 bg-primary/[0.02] ring-1 ring-primary/10" : "border-white/5 hover:border-white/10 hover:bg-[#070c1e]/45"
+        "w-full border-[3px] rounded-xl transition-all duration-500 shadow-md select-text p-3 flex flex-col relative overflow-hidden",
+        getContainerClasses()
       )}
     >
       {/* Horizontal row trigger bar */}
       <div 
-        className="grid grid-cols-12 gap-3 items-center w-full cursor-pointer"
+        className="grid grid-cols-12 gap-3 items-center w-full cursor-pointer relative z-10"
         onClick={() => setSelectedEventId(isExpanded ? null : event.eventId)}
       >
         {/* Name Column */}
@@ -543,18 +585,23 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         </div>
 
         {/* Status Dropdown Column */}
-        <div className="col-span-12 md:col-span-2 flex items-center justify-start md:justify-end" onClick={(e) => e.stopPropagation()}>
-          <div className="relative w-full max-w-[130px]">
+        <div className="col-span-12 md:col-span-2 flex items-center justify-start md:justify-end relative" onClick={(e) => e.stopPropagation()}>
+          {/* Radial glow background burst centered on the dropdown status menu */}
+          <div 
+            className="absolute pointer-events-none rounded-full blur-[45px] opacity-65 z-0 transition-all duration-500 -translate-x-1/2 -translate-y-1/2 left-1/2 top-1/2 w-[280px] h-[280px] md:w-[320px] md:h-[320px]"
+            style={getGlowStyle()}
+          />
+          <div className="relative w-full max-w-[130px] z-10">
             <select 
               value={event.status}
               onChange={(e) => { 
                 updateStatus(event.eventId, e.target.value as any); 
               }}
-              className="w-full bg-zinc-950/65 border border-white/10 rounded pl-2 pr-6 py-1 text-[10px] font-bold text-slate-300 focus:outline-none focus:border-primary/40 appearance-none transition-all cursor-pointer relative z-10"
+              className="w-full bg-zinc-950/80 border border-white/20 hover:border-white/30 rounded pl-2 pr-6 py-1 text-[10px] font-bold text-slate-100 focus:outline-none focus:border-white/40 appearance-none transition-all cursor-pointer relative z-10"
             >
               {stages.map(s => <option key={s.id} value={s.id} className="bg-[#030712]">{s.label}</option>)}
             </select>
-            <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-500 pointer-events-none z-20" />
+            <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none z-20" />
           </div>
         </div>
 
@@ -572,10 +619,10 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           <button 
             type="button"
             onClick={() => deleteEvent(event.eventId)}
-            className="p-1 px-1.5 bg-red-400/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded border border-red-500/20 hover:border-red-500/40 transition-all cursor-pointer flex items-center justify-center lg:opacity-0 group-hover:opacity-100 duration-200"
+            className="p-1 px-1.5 bg-white/10 hover:bg-white/20 text-white rounded border border-white/20 hover:border-white/40 transition-all cursor-pointer flex items-center justify-center shadow-sm"
             title="Delete Event"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5 text-white" />
           </button>
         </div>
       </div>
@@ -586,7 +633,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
           exit={{ opacity: 0, height: 0 }}
-          className="mt-3 pt-3 border-t border-white/10 space-y-3"
+          className="mt-3 pt-3 border-t border-white/10 space-y-3 relative z-10"
           onClick={(e) => e.stopPropagation()}
         >
           {event.status === 'Contacted' && (
@@ -896,9 +943,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
               <button
                 type="button"
                 onClick={() => setIsComposerOpen(!isComposerOpen)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-[9.5px] uppercase tracking-widest bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 hover:border-primary/45 rounded-xl font-bold transition-all cursor-pointer shadow-md shrink-0 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-[10px] uppercase font-mono tracking-widest bg-gradient-to-b from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white font-extrabold rounded-xl transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 focus:outline-none border-2 border-white/90 hover:border-white shadow-[0_12px_28px_rgba(20,184,166,0.45),_0_4px_8px_rgba(0,0,0,0.5)]"
               >
-                <Mail className="h-4 w-4 text-primary shrink-0 animate-pulse" />
+                <Mail className="h-4 w-4 text-white shrink-0 animate-pulse" />
                 <span>{isComposerOpen ? "Close Email Composer" : "Compose Email"}</span>
               </button>
 

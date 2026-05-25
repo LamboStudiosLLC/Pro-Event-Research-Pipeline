@@ -340,6 +340,11 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
   const deleteEvent = async (eventId: string) => {
     if (!user || !activeProjectId) return;
+    const confirmDelete = window.confirm(
+      "Warning: This delete action is permanent!\n\nIf you wish to take this listing out of the pipeline and return it to the Scans list, you must delete/un-save it from the Research > List Editor > Pipeline instead.\n\nAre you sure you want to permanently delete this listing?"
+    );
+    if (!confirmDelete) return;
+
     try {
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
       await deleteDoc(eventRef);
@@ -404,7 +409,7 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
       {/* Dynamic Header & Actions Bar (Share Buttons Removed) */}
       <div className="flex items-center justify-between bg-zinc-950/40 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
         <div className="flex flex-col min-w-0">
-          <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Sales & Exhibition Pipeline</span>
+          <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Project Loaded</span>
           <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2 mt-0.5 truncate select-text">
             {projectName || "Active Project Pipeline"}
             <span className="text-[10px] text-slate-500 font-mono font-normal">({events.length} tracked items)</span>
@@ -479,10 +484,10 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
       {/* Table Header Row */}
       <div className="hidden md:grid grid-cols-12 gap-3 items-center w-full px-5 py-2.5 bg-zinc-950/40 border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono mt-1 shrink-0">
-        <span className="col-span-4">Event / Vendor Name</span>
-        <span className="col-span-2">Type</span>
-        <span className="col-span-3">Date & Location</span>
-        <span className="col-span-2 text-right">Pipeline Status</span>
+         <span className="col-span-4">Event / Vendor Name</span>
+         <span className="col-span-2">Type</span>
+         <span className="col-span-3">Date / Location / Services</span>
+         <span className="col-span-2 text-right">Pipeline Status</span>
         <span className="col-span-1 text-right">Actions</span>
       </div>
 
