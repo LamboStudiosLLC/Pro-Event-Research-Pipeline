@@ -281,6 +281,132 @@ app.post("/api/research", async (req, res) => {
   }
 });
 
+// Helper for local simulation of email variations in case LLM is offline or rate-limited
+function generateLocalVariations(text: string): string[] {
+  const greetings = [
+    { target: "Hi [Contact Name]", alts: ["Hello [Contact Name]", "Dear [Contact Name]", "Hey [Contact Name]", "Greetings [Contact Name]"] },
+    { target: "Hi [Contact Name],", alts: ["Hello [Contact Name],", "Dear [Contact Name],", "Hey [Contact Name],", "Greetings [Contact Name],"] },
+    { target: "I hope you are having an excellent week", alts: ["I hope you're having a great week", "Hope you're having a wonderful week", "Hope you are having a productive week", "Hope your week is off to a great start"] },
+    { target: "Hi procurement team", alts: ["Hello procurement team", "To the procurement team", "Hi [Vendor Name] procurement", "Dear procurement team"] }
+  ];
+
+  const signoffs = [
+    { target: "Best regards", alts: ["Warm regards", "Sincerely", "Kind regards", "Warmly"] },
+    { target: "Best", alts: ["Best regards", "Kind regards", "Warmly", "Sincerely"] },
+    { target: "Thank you", alts: ["Thanks so much", "Many thanks", "With appreciation", "Best regards"] }
+  ];
+
+  const meetingPhrases = [
+    { target: "Would you have 10-15 minutes", alts: ["Might you have 15 minutes", "Do you have 10 to 15 minutes", "Could you spare 10-15 minutes", "Would you be open to a quick 10-15 minute chat"] }
+  ];
+
+  const variations: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    let current = text;
+    // Substitute common sentences/words
+    greetings.forEach(g => {
+      if (current.includes(g.target)) {
+        const alt = g.alts[i % g.alts.length];
+        current = current.replace(g.target, alt);
+      }
+    });
+    signoffs.forEach(s => {
+      if (current.includes(s.target)) {
+        const alt = s.alts[i % s.alts.length];
+        current = current.replace(s.target, alt);
+      }
+    });
+    meetingPhrases.forEach(m => {
+      if (current.includes(m.target)) {
+        const alt = m.alts[i % m.alts.length];
+        current = current.replace(m.target, alt);
+      }
+    });
+
+    // If it's still duplicate, append minor phrase
+    if (current === text || variations.includes(current)) {
+      const suffixes = [
+        " I appreciate your time.",
+        " Looking forward to connecting.",
+        " Hope we can catch up soon.",
+        " Have a wonderful day.",
+        " Enjoy the rest of your week.",
+        " Let me know what you think.",
+        " Thank you in advance for your consideration.",
+        " Talk soon.",
+        " Hope to speak details soon.",
+        " Cheers."
+      ];
+      const selectedSuffix = suffixes[i % suffixes.length];
+      const lines = current.split('\n');
+      if (lines.length > 2) {
+        lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
+        current = lines.join('\n');
+      } else {
+        current = current + "\n" + selectedSuffix;
+      }
+    }
+
+    variations.push(current);
+  }
+  return variations;
+}
+
+// Generate 20 variations of email with slight copywriting deviations using LLM
+app.post("/api/email-variations", async (req, res) => {
+  const { text } = req.body;
+  if (!text) {
+    return res.status(400).json({ error: "Email template text is required" });
+  }
+
+  try {
+    const prompt = `You are a high-performing outreach sequence copywriter.
+Take the following email outreach template:
+"${text}"
+
+Please generate exactly 20 slightly deviated variations of this email template. 
+Each variation must:
+1. Preserve all bracketed placeholders completely unchanged (like [Contact Name], [Vendor Name], [Event Name], [Event], [Vendor], [Salesperson]) because they are replaced at runtime.
+2. Have minor differences in tone, sentence order, vocabulary, or spacing, but keep the core message and CTA the same.
+3. Be fully natural and professional.
+
+Return exactly 20 distinct variations inside a JSON array under the key "variations".`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            variations: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "Exactly 20 slightly different variations of the core template"
+            }
+          },
+          required: ["variations"]
+        }
+      }
+    });
+
+    const result = JSON.parse(response.text);
+    if (result.variations && Array.isArray(result.variations)) {
+      let vars = result.variations;
+      while (vars.length < 20) {
+        vars.push(...generateLocalVariations(text).slice(0, 20 - vars.length));
+      }
+      return res.json({ variations: vars.slice(0, 20) });
+    }
+    throw new Error("Invalid format from LLM");
+  } catch (error: any) {
+    console.error("Email variations API error, falling back locally:", error.message);
+    const vars = generateLocalVariations(text);
+    res.json({ variations: vars });
+  }
+});
+
 // Linkup LinkedIn Verification & Contact Enrichment
 app.post("/api/linkedin-verify", async (req, res) => {
   const { contacts, companyName } = req.body;

@@ -16,7 +16,11 @@ import {
   Clock,
   ChevronDown,
   Zap,
-  Share2
+  Share2,
+  ArrowUp,
+  ArrowDown,
+  SlidersHorizontal,
+  ChevronUp
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -27,20 +31,20 @@ interface PipelineModeProps {
 }
 
 const STAGES = [
-  { id: 'Initial', label: 'Initial', icon: Clock, color: 'text-gray-400' },
+  { id: 'Initial', label: 'Not Started', icon: Clock, color: 'text-gray-450' },
   { id: 'Contacted', label: 'Contacted', icon: Mail, color: 'text-blue-400' },
-  { id: 'Responded', label: 'Responded', icon: MessageSquare, color: 'text-yellow-400' },
-  { id: 'Hot & Ready', label: 'Hot & Ready', icon: Zap, color: 'text-amber-400 font-bold' },
-  { id: 'Declined', label: 'Declined', icon: Trash2, color: 'text-red-400' }
+  { id: 'Responded', label: 'Responded', icon: MessageSquare, color: 'text-yellow-400' }
 ];
 
 const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const { user } = useFirebase();
   const [events, setEvents] = useState<SavedEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [draggedOverStageId, setDraggedOverStageId] = useState<string | null>(null);
-  const [draggingEventId, setDraggingEventId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('');
+
+  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('createdAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const expandedEvent = events.find(e => e.eventId === selectedEventId);
   const expandedStageId = expandedEvent ? expandedEvent.status : null;
@@ -356,9 +360,48 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     );
   }
 
+  // Filter and sort events
+  const filteredEvents = events.filter(e => {
+    // Only show events that belong to STAGES we are keeping
+    const isOurStage = STAGES.some(s => s.id === e.status);
+    if (!isOurStage) return false;
+
+    if (statusFilter === 'all') return true;
+    return e.status === statusFilter;
+  });
+
+  const sortedEvents = [...filteredEvents].sort((a, b) => {
+    let valA: any = '';
+    let valB: any = '';
+
+    if (sortField === 'eventName') {
+      valA = a.eventName || '';
+      valB = b.eventName || '';
+    } else if (sortField === 'status') {
+      valA = a.status || '';
+      valB = b.status || '';
+    } else if (sortField === 'date') {
+      valA = a.date || '';
+      valB = b.date || '';
+    } else if (sortField === 'createdAt') {
+      valA = (a as any).createdAt?.seconds || 0;
+      valB = (b as any).createdAt?.seconds || 0;
+    }
+
+    if (typeof valA === 'string') {
+      return sortDirection === 'asc' 
+        ? valA.localeCompare(valB) 
+        : valB.localeCompare(valA);
+    } else {
+      return sortDirection === 'asc' 
+        ? valA - valB 
+        : valB - valA;
+    }
+  });
+
   return (
     <div className="flex-1 w-full h-full flex flex-col gap-4">
-      {/* Dynamic Header & Actions Bar */}
+      {/* Dynamic Header & Actions Bar (Share Buttons Removed) */}
       <div className="flex items-center justify-between bg-zinc-950/40 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
         <div className="flex flex-col min-w-0">
           <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Sales & Exhibition Pipeline</span>
@@ -367,137 +410,112 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
             <span className="text-[10px] text-slate-500 font-mono font-normal">({events.length} tracked items)</span>
           </h2>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+      </div>
+
+      {/* Control panel for filters and sorting */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-zinc-950/20 border border-white/5 rounded-2xl p-4 shrink-0 shadow-md">
+        {/* Left Side: Status Filters */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-mono mr-1.5">Show:</span>
           <button
-            type="button"
-            onClick={downloadHotAndReadyCSV}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-4.5 py-2.5 rounded-xl text-xs transition-all active:scale-95 shadow-md hover:shadow-lg hover:shadow-amber-500/10 cursor-pointer"
+            onClick={() => setStatusFilter('all')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
+              statusFilter === 'all'
+                ? "bg-primary/20 border border-primary/30 text-primary font-bold"
+                : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+            )}
           >
-            <Zap className="h-4 w-4 fill-current" />
-            Share Hot & Ready
+            All ({events.filter(e => STAGES.some(s => s.id === e.status)).length})
           </button>
+          {STAGES.map(stage => {
+            const count = events.filter(e => e.status === stage.id).length;
+            return (
+              <button
+                key={stage.id}
+                onClick={() => setStatusFilter(stage.id)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                  statusFilter === stage.id
+                    ? "bg-primary/20 border border-primary/30 text-primary font-bold"
+                    : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+                )}
+              >
+                {stage.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right Side: Sorting Options */}
+        <div className="flex items-center gap-3 self-end md:self-auto">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value as any)}
+              className="bg-zinc-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-primary/45 cursor-pointer font-sans"
+            >
+              <option value="createdAt" className="bg-[#030712]">Date Scanned</option>
+              <option value="eventName" className="bg-[#030712]">Name (A-Z)</option>
+              <option value="status" className="bg-[#030712]">Pipeline Status</option>
+              <option value="date" className="bg-[#030712]">Event Date</option>
+            </select>
+          </div>
+
           <button
-            type="button"
-            onClick={downloadPipelineCSV}
-            className="flex items-center gap-2 bg-slate-200 hover:bg-white text-slate-900 font-extrabold px-4.5 py-2.5 rounded-xl text-xs transition-all active:scale-95 shadow-md hover:shadow-lg hover:shadow-white/5 cursor-pointer"
+            onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+            className="flex items-center justify-center p-1.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer"
+            title={sortDirection === 'asc' ? "Sort Ascending" : "Sort Descending"}
           >
-            <Share2 className="h-4 w-4" />
-            Share Entire Pipeline
+            {sortDirection === 'asc' ? (
+              <ArrowUp className="h-4 w-4" />
+            ) : (
+              <ArrowDown className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>
 
-      {/* Horizontal View Box for Stages */}
-      <div className="flex-1 w-full flex gap-2 h-full items-stretch justify-between select-none pb-2 pt-2 overflow-x-auto min-h-0 custom-scrollbar">
-        {STAGES.map((stage, sIdx) => {
-        const stageEvents = events.filter(e => e.status === stage.id);
-        const Icon = stage.icon;
-        const isDraggedOver = draggedOverStageId === stage.id;
-        const isReduced = !!expandedStageId && expandedStageId !== stage.id;
+      {/* Table Header Row */}
+      <div className="hidden md:grid grid-cols-12 gap-3 items-center w-full px-5 py-2.5 bg-zinc-950/40 border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono mt-1 shrink-0">
+        <span className="col-span-4">Event / Vendor Name</span>
+        <span className="col-span-2">Type</span>
+        <span className="col-span-3">Date & Location</span>
+        <span className="col-span-2 text-right">Pipeline Status</span>
+        <span className="col-span-1 text-right">Actions</span>
+      </div>
 
-        return (
-          <React.Fragment key={stage.id}>
-            {sIdx > 0 && (
-              <div className="w-[1.5px] bg-gradient-to-b from-transparent via-white/10 to-transparent shrink-0 self-stretch my-6" />
-            )}
-            <div 
-              className={cn(
-                "flex flex-col h-full rounded-2xl p-1 transition-all duration-300",
-                isReduced 
-                  ? "w-10 min-w-[40px] flex-none opacity-30 hover:opacity-100"
-                  : expandedStageId === stage.id 
-                    ? "flex-[3.5] min-w-[340px] md:min-w-[700px] lg:min-w-[850px] xl:min-w-[1000px] bg-white/[0.015]" 
-                    : "flex-1 min-w-[170px]"
-              )}
-              onDragOver={(e) => {
-                e.preventDefault();
-                if (draggedOverStageId !== stage.id) {
-                  setDraggedOverStageId(stage.id);
-                }
-              }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                setDraggedOverStageId(stage.id);
-              }}
-              onDrop={async (e) => {
-                e.preventDefault();
-                setDraggedOverStageId(null);
-                const evId = draggingEventId || e.dataTransfer.getData('text/plain');
-                if (evId) {
-                  await updateStatus(evId, stage.id as any);
-                }
-                setDraggingEventId(null);
-              }}
-            >
-              <div className="flex items-center justify-between mb-4 px-1 shrink-0">
-                {isReduced ? (
-                  <div className="flex items-center justify-center w-full">
-                    <div 
-                      className={cn("p-1.5 rounded bg-white/5 shrink-0 hover:bg-white/10 transition-all cursor-pointer")}
-                      title={`${stage.label} (${stageEvents.length} items)`}
-                    >
-                      <Icon className={cn("h-3 w-3", stage.color)} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div className={cn("p-1.5 rounded bg-white/5 shrink-0", stage.color)}>
-                       <Icon className="h-3 w-3" />
-                    </div>
-                    <h4 className="font-bold text-[9px] uppercase tracking-[0.1em] text-slate-500 truncate">{stage.label}</h4>
-                    <span className="bg-white/5 text-slate-400 text-[9px] px-1.5 py-0.2 rounded-full font-mono border border-white/5 shrink-0">
-                      {stageEvents.length}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {!isReduced && (
-                <div className={cn(
-                  "flex-1 space-y-3 overflow-y-auto custom-scrollbar p-1.5 rounded-xl transition-all duration-200 border-2",
-                  isDraggedOver ? "bg-primary/5 border-dashed border-primary/30" : "border-transparent"
-                )}>
-                  <AnimatePresence mode="popLayout">
-                    {stageEvents.map(event => (
-                      <PipelineCard
-                        key={event.eventId}
-                        event={event}
-                        selectedEventId={selectedEventId}
-                        setSelectedEventId={setSelectedEventId}
-                        onDragStart={(e, evId) => {
-                          e.dataTransfer.setData('text/plain', evId);
-                          setDraggingEventId(evId);
-                        }}
-                        onDragEnd={() => {
-                          setDraggedOverStageId(null);
-                          // Prevent premature cleanup before the drop target can consume the state
-                          setTimeout(() => {
-                            setDraggingEventId(null);
-                          }, 150);
-                        }}
-                        updateStatus={updateStatus}
-                        updateContactMethod={updateContactMethod}
-                        updateNotes={updateNotes}
-                        updateActionNotes={updateActionNotes}
-                        deleteEvent={deleteEvent}
-                        stages={STAGES}
-                        projectName={projectName}
-                        userEmail={user?.email || "No Email"}
-                        userDisplayName={user?.displayName || "Anonymous"}
-                      />
-                    ))}
-                  </AnimatePresence>
-                  {stageEvents.length === 0 && (
-                    <div className="h-20 border border-dashed border-white/5 rounded-xl flex items-center justify-center">
-                      <span className="text-[9px] text-slate-800 font-bold uppercase tracking-widest">Drop here</span>
-                    </div>
-                  )}
-                </div>
-              )}
+      {/* Horizontal List of Table Rows */}
+      <div className="flex-1 w-full overflow-y-auto custom-scrollbar space-y-3 pb-4">
+        <AnimatePresence mode="popLayout">
+          {sortedEvents.length === 0 ? (
+            <div className="h-40 border border-dashed border-white/5 rounded-2xl flex flex-col items-center justify-center bg-zinc-950/5 p-6 text-center">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">No items found</span>
+              <p className="text-[11px] text-slate-600 mt-2 max-w-sm font-medium">Try searching or adding items on the Research tab, or adjusting your filters.</p>
             </div>
-          </React.Fragment>
-        );
-      })}
+          ) : (
+            sortedEvents.map(event => (
+              <PipelineCard
+                key={event.eventId}
+                event={event}
+                selectedEventId={selectedEventId}
+                setSelectedEventId={setSelectedEventId}
+                updateStatus={updateStatus}
+                updateContactMethod={updateContactMethod}
+                updateNotes={updateNotes}
+                updateActionNotes={updateActionNotes}
+                deleteEvent={deleteEvent}
+                stages={STAGES}
+                projectName={projectName}
+                userEmail={user?.email || "No Email"}
+                userDisplayName={user?.displayName || "Anonymous"}
+                onDragStart={() => {}}
+                onDragEnd={() => {}}
+              />
+            ))
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

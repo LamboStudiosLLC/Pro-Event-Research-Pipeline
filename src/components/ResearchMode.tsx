@@ -31,7 +31,8 @@ import {
   Linkedin,
   Image,
   Upload,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -265,7 +266,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const [savedEventsExpanded, setSavedEventsExpanded] = useState(true);
   const [projectName, setProjectName] = useState('');
   const [copiedContactIdx, setCopiedContactIdx] = useState<number | null>(null);
-  const [selectedModel, setSelectedModel] = useState('gemini-3.5-flash');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
+  const [leftActiveTab, setLeftActiveTab] = useState<'cue' | 'scans' | 'pipeline'>('cue');
+  const [scannedList, setScannedList] = useState<any[]>([]);
   const [searchType, setSearchType] = useState<'event' | 'vendor'>('event');
   
   const [simulationMode, setSimulationMode] = useState<boolean>(() => localStorage.getItem('research_sim_mode') === 'true');
@@ -674,6 +677,67 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     return () => unsubscribe();
   }, [user, activeProjectId]);
 
+  // Fetch scan history
+  useEffect(() => {
+    if (!user || !activeProjectId) {
+      setScannedList([]);
+      return;
+    }
+    const q = fsQuery(collection(db, 'users', user.uid, 'projects', activeProjectId, 'scans'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({
+        scanId: doc.id,
+        ...doc.data()
+      } as any));
+      // Sort by createdAt descending (most recent first)
+      list.sort((a, b) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        if (timeB !== timeA) {
+          return timeB - timeA;
+        }
+        return (a.eventName || '').localeCompare(b.eventName || '');
+      });
+      setScannedList(list);
+    });
+    return () => unsubscribe();
+  }, [user, activeProjectId]);
+
+  const saveToScans = async (data: ResearchResult) => {
+    if (!user || !activeProjectId || !data || !data.eventName) return;
+    try {
+      const scanId = encodeURIComponent(data.eventName.toLowerCase().replace(/[^a-z0-9]/g, '-')).slice(0, 100);
+      const scanRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'scans', scanId);
+      await setDoc(scanRef, {
+        eventName: data.eventName,
+        date: data.date || '',
+        location: data.location || '',
+        description: data.description || '',
+        contacts: data.contacts || [],
+        website: data.website || '',
+        logoUrl: data.logoUrl || '',
+        notes: data.notes || '',
+        actionNotes: data.actionNotes || [],
+        searchType: data.searchType || 'event',
+        yearFounded: data.yearFounded || '',
+        isSandbox: data.isSandbox || false,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.error("Failed to save scan history:", err);
+    }
+  };
+
+  const handleDeleteScannedEvent = async (scanId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!user || !activeProjectId) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'scans', scanId));
+    } catch (err) {
+      console.error("Failed to delete scanned event:", err);
+    }
+  };
+
   useEffect(() => {
     if (!user || !activeProjectId) {
       setProjectName('');
@@ -719,6 +783,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         await new Promise(resolve => setTimeout(resolve, 1200));
         const data = getSimulatedResult(queryText, searchType);
         setResult(data);
+        await saveToScans(data);
         setSpendingCapError(null);
       } catch (err) {
         console.error(err);
@@ -752,6 +817,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         throw new Error(data.details || data.error);
       }
       setResult(data);
+      await saveToScans(data);
       setSpendingCapError(null);
     } catch (error: any) {
       console.error(error);
@@ -782,7 +848,11 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         await new Promise(resolve => setTimeout(resolve, 1200));
         const data = getSimulatedResult(item.eventName, item.searchType || 'event');
         setResult(data);
+        await saveToScans(data);
         setSpendingCapError(null);
+        if (item.cueId && user && activeProjectId) {
+          await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -818,7 +888,11 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         throw new Error(data.details || data.error);
       }
       setResult(data);
+      await saveToScans(data);
       setSpendingCapError(null);
+      if (item.cueId && user && activeProjectId) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+      }
     } catch (err: any) {
       console.error(err);
       alert(err.message || "Failed to research.");
@@ -838,9 +912,24 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   };
 
   const handleSave = async () => {
-    if (!user || !result || isSaved) return;
+    if (!user || !result) return;
 
     let targetProjectId = activeProjectId;
+
+    if (isSaved) {
+      if (!targetProjectId) return;
+      const savedEv = savedEvents.find(e => e.eventName.toLowerCase() === result.eventName.toLowerCase() || e.eventId === (result as any).eventId);
+      if (savedEv && savedEv.eventId) {
+        try {
+          await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'events', savedEv.eventId));
+          setIsSaved(false);
+        } catch (e) {
+          console.error("Failed to unsave event from pipeline:", e);
+          alert("Failed to unsave event from pipeline");
+        }
+      }
+      return;
+    }
 
     if (!targetProjectId) {
       const name = prompt("Select or Create a Project to save your events.\nTo + Create a New Project, enter the name here:");
@@ -1251,6 +1340,7 @@ Pro Event Research Team`;
           await new Promise(resolve => setTimeout(resolve, 600));
           const data = getSimulatedResult(name, searchType);
           fetchedResults.push(data);
+          await saveToScans(data);
           setSpendingCapError(null);
         } catch (err) {
           console.error(err);
@@ -1267,6 +1357,7 @@ Pro Event Research Team`;
         const data = await response.json();
         if (data && !data.error) {
           fetchedResults.push(data);
+          await saveToScans(data);
         } else {
           console.error(`Error researching "${name}":`, data?.details || data?.error);
           const errStr = String(data?.error + " " + data?.details).toLowerCase();
@@ -1306,41 +1397,58 @@ Pro Event Research Team`;
       {/* Sidebar Filters & Saved Events */}
       <aside className="w-72 flex flex-col p-5 glass border-r shrink-0 rounded-2xl h-full overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 space-y-4 overflow-y-auto custom-scrollbar pr-1 select-text">
-          {/* Research Cue Section */}
-          <div className="shrink-0 flex flex-col border-b border-white/5 pb-3">
-            <div className="flex items-center justify-between mb-2">
-              <button
-                type="button"
-                onClick={() => setCueExpanded(!cueExpanded)}
-                className="flex items-center gap-2 text-left focus:outline-none cursor-pointer group select-none"
-              >
-                <ChevronDown 
-                  className={cn(
-                    "h-3.5 w-3.5 text-slate-500 group-hover:text-slate-350 transition-transform",
-                    cueExpanded ? "rotate-0 text-primary" : "-rotate-90"
-                  )} 
-                />
-                <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold group-hover:text-slate-200 transition-colors">Research Cue ({researchCue.length})</span>
-              </button>
-              
-              {researchCue.length > 0 && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={downloadCueCSV}
-                    className="px-1.5 py-0.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 rounded text-[8px] transition-all cursor-pointer font-bold uppercase tracking-tight"
-                    title="Export Research Cue to CSV"
-                  >
-                    CSV Export
-                  </button>
-                </div>
-              )}
-            </div>
+          {/* List Editor Subtitle */}
+          <div className="flex items-center gap-2 px-1 shrink-0">
+            <Edit3 className="h-4 w-4 text-primary" />
+            <h4 className="text-xs font-bold text-white uppercase tracking-widest">List Editor</h4>
+          </div>
 
-            {cueExpanded && (
-              <div className="space-y-1.5 max-h-[160px] overflow-y-auto custom-scrollbar mt-1 pr-0.5">
+          {/* Navigation Tabs */}
+          <div className="shrink-0 flex border-b border-white/5 p-1 bg-zinc-950/20 rounded-xl gap-1">
+            <button
+              type="button"
+              onClick={() => setLeftActiveTab('cue')}
+              className={cn(
+                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                leftActiveTab === 'cue'
+                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+              )}
+            >
+              Cue ({researchCue.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeftActiveTab('scans')}
+              className={cn(
+                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                leftActiveTab === 'scans'
+                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+              )}
+            >
+              Scans ({scannedList.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeftActiveTab('pipeline')}
+              className={cn(
+                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                leftActiveTab === 'pipeline'
+                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+              )}
+            >
+              Pipeline ({savedEvents.length})
+            </button>
+          </div>
+
+          {/* Active Tab Content */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {leftActiveTab === 'cue' && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1">
                 {researchCue.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-3 text-center select-none">
+                  <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
                     <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No items cued</span>
                   </div>
                 ) : (
@@ -1355,31 +1463,31 @@ Pro Event Research Team`;
                             setSearchType(ev.searchType || 'event');
                           }}
                           className={cn(
-                            "w-full text-left px-2 py-1.5 pr-12 rounded-lg text-[11px] transition-all flex flex-col border cursor-pointer select-text",
+                            "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
                             isSelected 
                               ? "bg-primary/15 border-primary/40 text-white font-medium" 
                               : "bg-white/[0.01] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
                           )}
                         >
-                          <span className="truncate w-full block font-medium select-text">{ev.eventName}</span>
+                          <span className="truncate w-full block font-semibold select-text">{ev.eventName}</span>
                         </button>
                         
                         <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
                           <button
                             type="button"
                             onClick={() => handleTriggerCueSearch(ev)}
-                            className="p-1 bg-primary/10 hover:bg-primary/25 text-primary rounded border border-primary/20 cursor-pointer"
+                            className="p-1.5 bg-primary/10 hover:bg-primary/25 text-primary rounded border border-primary/20 cursor-pointer"
                             title="Run deep research"
                           >
-                            <Search className="h-2.5 w-2.5" />
+                            <Search className="h-3 w-3" />
                           </button>
                           <button
                             type="button"
                             onClick={(e) => handleDeleteCueItem(ev.cueId, e)}
-                            className="p-1 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
+                            className="p-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
                             title="Remove from cue"
                           >
-                            <Trash2 className="h-2.5 w-2.5" />
+                            <Trash2 className="h-3 w-3" />
                           </button>
                         </div>
                       </div>
@@ -1388,46 +1496,81 @@ Pro Event Research Team`;
                 )}
               </div>
             )}
-          </div>
 
-          {/* Saved to Project Section */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-2">
-              <button
-                type="button"
-                onClick={() => setSavedEventsExpanded(!savedEventsExpanded)}
-                className="flex items-center gap-2 text-left focus:outline-none cursor-pointer group select-none"
-              >
-                <ChevronDown 
-                  className={cn(
-                    "h-3.5 w-3.5 text-slate-500 group-hover:text-slate-350 transition-transform",
-                    savedEventsExpanded ? "rotate-0 text-primary" : "-rotate-90"
-                  )} 
-                />
-                <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold group-hover:text-slate-200 transition-colors">Saved to Project ({savedEvents.length})</span>
-              </button>
-              {savedEvents.length > 0 && (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={downloadProjectCSV}
-                    className="px-1.5 py-0.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 rounded text-[9px] transition-all cursor-pointer font-bold tracking-tight uppercase"
-                    title="Export Project to CSV"
-                  >
-                    CSV Export
-                  </button>
-                </div>
-              )}
-            </div>
-            {savedEventsExpanded && (
-              savedEvents.length === 0 ? (
-                <div className="flex-1 rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none">
-                  <Bookmark className="h-6 w-6 text-slate-700 mb-2" />
-                  <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">No events saved</span>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5">
-                  {savedEvents.map((ev) => {
+            {leftActiveTab === 'scans' && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1">
+                {scannedList.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
+                    <Search className="h-5 w-5 text-slate-700 mb-1.5" />
+                    <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No scans finished yet</span>
+                  </div>
+                ) : (
+                  scannedList.map((ev) => {
+                    const isSelected = result && (result.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                    const isInPipeline = savedEvents.some(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                    return (
+                      <div key={ev.scanId} className="relative group select-text">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResult(ev);
+                            setQueryText(ev.eventName);
+                            setSearchType(ev.searchType || 'event');
+                          }}
+                          className={cn(
+                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
+                            isSelected 
+                              ? "bg-primary/10 border-primary/30 text-white font-medium" 
+                              : "bg-white/[0.02] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-1.5 w-full">
+                            <span className={cn(
+                              "truncate font-semibold select-text",
+                              isInPipeline ? "text-slate-500 font-normal" : "text-white"
+                            )}>
+                              {ev.eventName}
+                            </span>
+                            {isInPipeline && (
+                              <span className="text-[8.5px] text-slate-500 shrink-0 font-medium italic">
+                                in pipeline
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-500 truncate w-full block select-text">
+                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
+                          </span>
+                          {ev.isSandbox && (
+                            <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
+                              ⚠️ Sandbox Test
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => handleDeleteScannedEvent(ev.scanId, e)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
+                          title="Delete scan"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {leftActiveTab === 'pipeline' && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1">
+                {savedEvents.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
+                    <Bookmark className="h-5 w-5 text-slate-700 mb-1.5" />
+                    <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No events saved to pipeline</span>
+                  </div>
+                ) : (
+                  savedEvents.map((ev) => {
                     const isSelected = result && (result.eventName === ev.eventName || (result as any).eventId === ev.eventId);
                     return (
                       <div key={ev.eventId} className="relative group select-text">
@@ -1436,20 +1579,21 @@ Pro Event Research Team`;
                           onClick={() => {
                             setResult(ev);
                             setQueryText(ev.eventName);
+                            setSearchType(ev.searchType || 'event');
                           }}
                           className={cn(
-                            "w-full text-left px-3 py-2 pr-8 rounded-lg text-xs transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
+                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
                             isSelected 
                               ? "bg-primary/10 border-primary/30 text-white font-medium" 
                               : "bg-white/[0.02] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
                           )}
                         >
-                          <span className="truncate w-full block font-medium select-text">{ev.eventName}</span>
+                          <span className="truncate w-full block font-semibold text-white select-text">{ev.eventName}</span>
                           <span className="text-[9px] text-slate-500 truncate w-full block select-text">
                             {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
                           </span>
                           {ev.isSandbox && (
-                            <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start">
+                            <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
                               ⚠️ Sandbox Test
                             </span>
                           )}
@@ -1459,15 +1603,15 @@ Pro Event Research Team`;
                           onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => handleDeleteSavedEvent(ev.eventId, e)}
                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
-                          title="Remove from project"
+                          title="Remove from pipeline"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3 w-3" />
                         </button>
                       </div>
                     );
-                  })}
-                </div>
-              )
+                  })
+                )}
+              </div>
             )}
           </div>
 
@@ -1830,7 +1974,7 @@ Pro Event Research Team`;
                   )}
                 >
                   <Heart className={cn("h-3 w-3", isSaved && "fill-current")} />
-                  <span>{isSaved ? "SAVED" : "SAVE TO PROJECT"}</span>
+                  <span>{isSaved ? "SAVED" : "SAVE TO PIPELINE"}</span>
                 </button>
                 <button 
                   onClick={downloadCSV}

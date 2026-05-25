@@ -4,6 +4,7 @@ import {
   Calendar, 
   MapPin, 
   ChevronDown, 
+  ChevronRight,
   Trash2, 
   Users,
   Mail,
@@ -26,7 +27,64 @@ interface EmailTemplate {
   id: string;
   name: string;
   text: string;
+  variations?: string[];
+  currentIndex?: number;
 }
+
+const generateLocalVariationsClient = (text: string): string[] => {
+  const greetings = [
+    { target: "Hi [Contact Name]", alts: ["Hello [Contact Name]", "Dear [Contact Name]", "Hey [Contact Name]", "Greetings [Contact Name]"] },
+    { target: "Hi [Contact Name],", alts: ["Hello [Contact Name],", "Dear [Contact Name],", "Hey [Contact Name],", "Greetings [Contact Name],"] },
+    { target: "I hope you are having an excellent week", alts: ["I hope you're having a great week", "Hope you're having a wonderful week", "Hope you are having a productive week", "Hope your week is off to a great start"] },
+    { target: "Hi procurement team", alts: ["Hello procurement team", "To the procurement team", "Hi [Vendor Name] procurement", "Dear procurement team"] }
+  ];
+
+  const signoffs = [
+    { target: "Best regards", alts: ["Warm regards", "Sincerely", "Kind regards", "Warmly"] },
+    { target: "Best", alts: ["Best regards", "Kind regards", "Warmly", "Sincerely"] },
+    { target: "Thank you", alts: ["Thanks so much", "Many thanks", "With appreciation", "Best regards"] }
+  ];
+
+  const variations: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    let current = text;
+    greetings.forEach(g => {
+      if (current.includes(g.target)) {
+        current = current.replace(g.target, g.alts[i % g.alts.length]);
+      }
+    });
+    signoffs.forEach(s => {
+      if (current.includes(s.target)) {
+        current = current.replace(s.target, s.alts[i % s.alts.length]);
+      }
+    });
+
+    if (current === text || variations.includes(current)) {
+      const suffixes = [
+        " I appreciate your time.",
+        " Looking forward to connecting.",
+        " Hope we can catch up soon.",
+        " Have a wonderful day.",
+        " Enjoy the rest of your week.",
+        " Let me know what you think.",
+        " Thank you in advance for your consideration.",
+        " Talk soon.",
+        " Hope to speak details soon.",
+        " Cheers."
+      ];
+      const selectedSuffix = suffixes[i % suffixes.length];
+      const lines = current.split('\n');
+      if (lines.length > 2) {
+        lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
+        current = lines.join('\n');
+      } else {
+        current = current + "\n" + selectedSuffix;
+      }
+    }
+    variations.push(current);
+  }
+  return variations;
+};
 
 const DEFAULT_TEMPLATES: EmailTemplate[] = [
   {
@@ -140,7 +198,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     return text;
   };
 
-  const handleSelectTemplate = (id: string) => {
+  const handleSelectTemplate = async (id: string) => {
     setSelectedTemplateId(id);
     if (!id) {
       setEmailText("");
@@ -148,12 +206,53 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     }
     const found = templates.find(t => t.id === id);
     if (found) {
-      const resolved = applyReplacements(found.text);
+      let currentVars = found.variations;
+      let idx = found.currentIndex || 0;
+
+      if (!currentVars || currentVars.length < 2) {
+        currentVars = generateLocalVariationsClient(found.text);
+      }
+
+      const rawText = currentVars[idx % currentVars.length];
+      const resolved = applyReplacements(rawText);
       setEmailText(resolved);
+
+      const nextIndex = (idx + 1) % currentVars.length;
+      const updated = templates.map(t => 
+        t.id === id 
+          ? { ...t, variations: currentVars, currentIndex: nextIndex } 
+          : t
+      );
+      setTemplates(updated);
+      localStorage.setItem('email_templates', JSON.stringify(updated));
+
+      if (!found.variations) {
+        try {
+          const res = await fetch('/api/email-variations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: found.text })
+          });
+          const data = await res.json();
+          if (data.variations && Array.isArray(data.variations)) {
+            setTemplates(prev => {
+              const live = prev.map(t => 
+                t.id === id 
+                  ? { ...t, variations: data.variations } 
+                  : t
+              );
+              localStorage.setItem('email_templates', JSON.stringify(live));
+              return live;
+            });
+          }
+        } catch (e) {
+          console.error("Failed to fetch variations in background:", e);
+        }
+      }
     }
   };
 
-  const handleConfirmSaveTemplate = () => {
+  const handleConfirmSaveTemplate = async () => {
     if (!newTemplateName.trim()) {
       alert("Please enter a template name.");
       return;
@@ -163,19 +262,51 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       return;
     }
 
+    alert("DISCLAIMER & ROTATOR SETUP\n\nYour new template is being saved! 20 unique AI copy variations are currently being rendered by the Google Gemini LLM and will be placed on sequential rotation each time you select this template.");
+
+    const templateTextToVary = emailText;
+    const templateName = newTemplateName.trim();
+    setIsSavingTemplateMode(false);
+    setNewTemplateName("");
+
+    const tempId = Math.random().toString(36).substring(2, 11);
+    const localVars = generateLocalVariationsClient(templateTextToVary);
+    
     const newTemplate: EmailTemplate = {
-      id: Math.random().toString(36).substring(2, 11),
-      name: newTemplateName.trim(),
-      text: emailText
+      id: tempId,
+      name: templateName,
+      text: templateTextToVary,
+      variations: localVars,
+      currentIndex: 0
     };
 
     const updated = [...templates, newTemplate];
     setTemplates(updated);
     localStorage.setItem('email_templates', JSON.stringify(updated));
-    setSelectedTemplateId(newTemplate.id);
-    setIsSavingTemplateMode(false);
-    setNewTemplateName("");
-    alert(`Template "${newTemplate.name}" saved successfully!`);
+    setSelectedTemplateId(tempId);
+
+    try {
+      const response = await fetch('/api/email-variations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: templateTextToVary })
+      });
+      const data = await response.json();
+      if (data.variations && Array.isArray(data.variations)) {
+        setTemplates(prev => {
+          const live = prev.map(t => {
+            if (t.id === tempId) {
+              return { ...t, variations: data.variations };
+            }
+            return t;
+          });
+          localStorage.setItem('email_templates', JSON.stringify(live));
+          return live;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to generate variations via LLM API, using fallback:", err);
+    }
   };
 
   const handleCopyText = () => {
@@ -349,143 +480,104 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     <motion.div
       ref={cardRef}
       layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      draggable={canDrag}
-      onDragStart={(e) => onDragStart(e, event.eventId)}
-      onDragEnd={onDragEnd}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
       className={cn(
-        "glass p-3 rounded-xl border transition-all cursor-grab active:cursor-grabbing group relative shadow-xl select-text w-full",
-        isExpanded ? "border-primary/50 ring-1 ring-primary/20 bg-primary/5 shrink-0" : "border-white/5 hover:border-primary/40 hover:bg-white/[0.04]"
+        "w-full bg-[#050914]/40 border rounded-xl transition-all shadow-md select-text p-3 flex flex-col",
+        isExpanded ? "border-primary/40 bg-primary/[0.02] ring-1 ring-primary/10" : "border-white/5 hover:border-white/10 hover:bg-[#070c1e]/45"
       )}
     >
-      {/* Expand/Collapse Button in the Upper Right Corner */}
-      <div className="absolute top-2.5 right-2 z-20">
-         <button 
-          type="button"
-          draggable={false}
-          onMouseDown={(e) => {
-            e.stopPropagation();
-            setCanDrag(false);
-          }}
-          onMouseEnter={() => setCanDrag(false)}
-          onMouseLeave={() => setCanDrag(true)}
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            setSelectedEventId(isExpanded ? null : event.eventId); 
-          }}
-          className="p-1 hover:bg-white/10 text-slate-400 hover:text-white rounded border border-white/5 transition-all cursor-pointer"
-          title={isExpanded ? "Minimize Card" : "Expand Card"}
-         >
-           {isExpanded ? <Minimize2 className="h-3 w-3 text-primary" /> : <Maximize2 className="h-3 w-3" />}
-         </button>
-      </div>
-
-      {/* Top Header Section (Click anywhere here triggers Expand/Collapse toggle) */}
+      {/* Horizontal row trigger bar */}
       <div 
-        className="cursor-pointer select-text pr-8 pb-1"
-        onClick={(e) => {
-          e.stopPropagation();
-          setSelectedEventId(isExpanded ? null : event.eventId);
-        }}
-        title="Click card header to expand or edit detail views"
+        className="grid grid-cols-12 gap-3 items-center w-full cursor-pointer"
+        onClick={() => setSelectedEventId(isExpanded ? null : event.eventId)}
       >
-        <h5 className="font-bold text-[12px] mb-2 leading-tight tracking-tight text-white group-hover:text-primary transition-colors truncate">
-          {event.eventName}
-        </h5>
-        
-        {event.isSandbox && (
-          <div className="mb-2 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded px-1.5 py-1 text-[8.5px] font-semibold leading-tight flex items-start gap-1">
-            <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-amber-500 mt-0.5" />
-            <span>Sandbox Test Record. Please delete after testing.</span>
+        {/* Name Column */}
+        <div className="col-span-12 md:col-span-4 min-w-0 flex items-center gap-2">
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4 text-primary shrink-0 transition-transform duration-250 rotate-180" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-slate-500 shrink-0 transition-transform duration-250" />
+          )}
+          
+          <div className="min-w-0 pr-2">
+            <h5 className="font-semibold text-xs text-white hover:text-primary transition-colors truncate">
+              {event.eventName}
+            </h5>
+            {event.isSandbox && (
+              <span className="inline-flex items-center gap-1 mt-0.5 text-[7px] text-amber-405 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1 py-0.2 rounded">
+                Sandbox
+              </span>
+            )}
           </div>
-        )}
-        
-        <div className="space-y-1 mb-2">
-          <div className="flex items-center gap-1.5 text-[9px] text-slate-500 truncate" title={event.searchType === 'vendor' ? "Services & Solutions" : "Dates"}>
+        </div>
+
+        {/* Type Column */}
+        <div className="col-span-4 md:col-span-2">
+          {event.searchType === 'vendor' ? (
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+               Vendor
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-blue-500/10 border border-blue-500/20 text-blue-400">
+               Event
+            </span>
+          )}
+        </div>
+
+        {/* Date & Location Column */}
+        <div className="col-span-8 md:col-span-3 min-w-0 space-y-0.5">
+          <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
             {event.searchType === 'vendor' ? (
-              <Briefcase className="h-2.5 w-2.5 text-primary/60 shrink-0" />
+              <Briefcase className="h-3 w-3 text-primary/60 shrink-0" />
             ) : (
-              <Calendar className="h-2.5 w-2.5 text-primary/60 shrink-0" />
+              <Calendar className="h-3 w-3 text-primary/60 shrink-0" />
             )}
             <span className="truncate">{event.date}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-[9px] text-slate-500 truncate" title={event.searchType === 'vendor' ? "Corporate Headquarters" : "Event Location"}>
-            <MapPin className="h-2.5 w-2.5 text-primary/60 shrink-0" />
+          <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
+            <MapPin className="h-3 w-3 text-primary/60 shrink-0" />
             <span className="truncate">{event.searchType === 'vendor' ? `HQ: ${event.location}` : event.location}</span>
           </div>
         </div>
-      </div>
 
-      {/* Interactive elements section - disable dragging when hovering or interacting here */}
-      <div 
-        className="space-y-2 mt-2" 
-        onMouseEnter={() => setCanDrag(false)}
-        onMouseLeave={() => setCanDrag(true)}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2 justify-between">
-          {/* Status Dropdown with Reduced Width */}
-          <div className="relative flex-1 max-w-[120px] min-w-[75px]">
+        {/* Status Dropdown Column */}
+        <div className="col-span-12 md:col-span-2 flex items-center justify-start md:justify-end" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full max-w-[130px]">
             <select 
               value={event.status}
               onChange={(e) => { 
-                e.stopPropagation(); 
                 updateStatus(event.eventId, e.target.value as any); 
               }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full bg-zinc-900/60 border border-white/5 rounded pl-1.5 pr-5 py-1 text-[9px] font-semibold text-slate-300 focus:outline-none focus:border-primary/40 appearance-none transition-all cursor-pointer relative z-10"
+              className="w-full bg-zinc-950/65 border border-white/10 rounded pl-2 pr-6 py-1 text-[10px] font-bold text-slate-300 focus:outline-none focus:border-primary/40 appearance-none transition-all cursor-pointer relative z-10"
             >
               {stages.map(s => <option key={s.id} value={s.id} className="bg-[#030712]">{s.label}</option>)}
             </select>
-            <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-slate-500 pointer-events-none z-20" />
-          </div>
-
-          {/* Share & Trash Buttons Side-by-Side in lower right corner */}
-          <div className="flex items-center gap-1 shrink-0">
-             <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                downloadSingleCardCSV();
-              }}
-              className="p-1 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded border border-white/5 hover:border-white/10 transition-all cursor-pointer flex items-center justify-center h-[22px] w-[22px]"
-              title="Share Card CSV"
-             >
-               <Share2 className="h-3.5 w-3.5" />
-             </button>
-
-             <button 
-              type="button"
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                deleteEvent(event.eventId); 
-              }}
-              className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded border border-red-500/20 hover:border-red-500/40 transition-all cursor-pointer flex items-center justify-center h-[22px] w-[22px]"
-              title="Delete Event"
-             >
-               <Trash2 className="h-3.5 w-3.5" />
-             </button>
+            <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-500 pointer-events-none z-20" />
           </div>
         </div>
 
-        {event.status === 'Contacted' && (
-          <div className="flex items-center justify-between bg-black/40 p-1 rounded border border-white/5 mt-1">
-            <span className="text-[8px] uppercase tracking-wider font-bold text-slate-500 pl-1">Method:</span>
-            <select
-              value={event.contactMethod || 'Email'}
-              onChange={(e) => updateContactMethod(event.eventId, e.target.value)}
-              className="bg-zinc-900 border border-white/15 rounded px-1 py-0.5 text-[8px] text-primary focus:outline-none focus:border-primary/40 cursor-pointer"
-            >
-              <option value="Email" className="bg-[#030712]">Email</option>
-              <option value="Phone Call" className="bg-[#030712]">Phone Call</option>
-              <option value="LinkedIn" className="bg-[#030712]">LinkedIn</option>
-              <option value="In Person" className="bg-[#030712]">In Person</option>
-              <option value="Other" className="bg-[#030712]">Other</option>
-            </select>
-          </div>
-        )}
+        {/* Actions Column */}
+        <div className="col-span-12 md:col-span-1 flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => downloadSingleCardCSV()}
+            className="p-1 px-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded border border-white/5 hover:border-white/10 transition-all cursor-pointer flex items-center justify-center"
+            title="Share Card CSV"
+          >
+            <Share2 className="h-3 w-3" />
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => deleteEvent(event.eventId)}
+            className="p-1 px-1.5 bg-red-400/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded border border-red-500/20 hover:border-red-500/40 transition-all cursor-pointer flex items-center justify-center lg:opacity-0 group-hover:opacity-100 duration-200"
+            title="Delete Event"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
 
       {/* Expanded view for viewing ALL contact information details and notes */}
@@ -495,10 +587,25 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           animate={{ opacity: 1, height: 'auto' }}
           exit={{ opacity: 0, height: 0 }}
           className="mt-3 pt-3 border-t border-white/10 space-y-3"
-          onMouseEnter={() => setCanDrag(false)}
-          onMouseLeave={() => setCanDrag(true)}
           onClick={(e) => e.stopPropagation()}
         >
+          {event.status === 'Contacted' && (
+            <div className="flex items-center gap-2 bg-black/40 p-1.5 rounded border border-white/5 mb-1.5 self-start w-fit">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 pl-1">Outreach Method:</span>
+              <select
+                value={event.contactMethod || 'Email'}
+                onChange={(e) => updateContactMethod(event.eventId, e.target.value)}
+                className="bg-zinc-900 border border-white/15 rounded px-2 py-0.5 text-[10px] text-primary focus:outline-none focus:border-primary/40 cursor-pointer"
+              >
+                <option value="Email" className="bg-[#030712]">Email</option>
+                <option value="Phone Call" className="bg-[#030712]">Phone Call</option>
+                <option value="LinkedIn" className="bg-[#030712]">LinkedIn</option>
+                <option value="In Person" className="bg-[#030712]">In Person</option>
+                <option value="Other" className="bg-[#030712]">Other</option>
+              </select>
+            </div>
+          )}
+
           {/* Grid Layout taking advantage of 3-column wide layout */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             
@@ -510,6 +617,11 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                   <div className="flex items-center gap-2">
                     <Mail className="h-4 w-4 text-primary animate-pulse" />
                     <span className="text-[10px] font-bold text-white uppercase tracking-wider font-mono">AI Email Composer</span>
+                    {selectedTemplateId && (
+                      <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono animate-pulse uppercase tracking-wider font-bold">
+                        Rotator active - copy #{((templates.find(t => t.id === selectedTemplateId)?.currentIndex || 0) + 1)}/20
+                      </span>
+                    )}
                   </div>
                   
                   {/* Template actions */}
@@ -641,6 +753,19 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                     >
                       <Zap className="h-3.5 w-3.5 text-slate-900 animate-pulse" />
                       <span>New Email</span>
+                    </button>
+
+                    {/* Mark as Sent button */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsComposerOpen(false);
+                        await updateStatus(event.eventId, 'Contacted');
+                      }}
+                      className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-red-650 hover:bg-red-500 text-white font-bold rounded-lg text-[9px] cursor-pointer transition-all shadow-md shrink-0"
+                      title="Mark email as sent and change status to Contacted"
+                    >
+                      <span>Mark as Sent</span>
                     </button>
 
                     {/* Button to Close Composer */}
