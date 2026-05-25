@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection test paths
+    match /_connection_test_/{docId} {
+      allow read: if true;
+    }
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // 2. Primitives & Helpers
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { 
+      return isSignedIn() && request.auth.uid == userId; 
+    }
+
+    // 3. Validation Blueprints
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt']) && 
+             data.keys().size() == 3 &&
+             data.userId == request.auth.uid &&
+             data.email is string && data.email.size() <= 256;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['userId', 'name', 'createdAt']) && 
+             data.keys().size() == 3 &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128;
+    }
+
+    function isValidSavedEvent(data) {
+      return data.keys().hasAll(['eventId', 'projectId', 'userId', 'eventName', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.eventId.size() <= 128 &&
+             data.projectId.size() <= 128 &&
+             data.eventName is string && data.eventName.size() <= 1000 &&
+             (data.get('description', '') is string && data.get('description', '').size() <= 100000) &&
+             (data.get('status', 'Initial') in ['Initial', 'Contacted', 'Responded', 'Hot & Ready', 'Declined']);
+    }
+
+    // 4. Match Blocks
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /projects/{projectId} {
+        allow read, write: if isOwner(userId);
+
+        match /events/{eventId} {
+          allow read, write: if isOwner(userId);
+        }
+
+        match /research_cue/{cueId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+    }
+  }
+}

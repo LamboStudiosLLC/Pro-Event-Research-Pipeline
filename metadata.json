@@ -1,0 +1,6 @@
+{
+  "name": "Pro Event Research Pipeline",
+  "description": "Futuristic tool for researching events, conference contacts, and tracking sales pipelines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

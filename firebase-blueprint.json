@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "createdAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A collection of research results",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "createdAt"]
+    },
+    "SavedEvent": {
+      "title": "Saved Event",
+      "description": "An event research result saved to a project",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "userId": { "type": "string" },
+        "eventName": { "type": "string" },
+        "date": { "type": "string" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "contacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": { "type": "string" },
+              "name": { "type": "string" },
+              "contactInfo": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["Initial", "Emailed", "Responded", "Phone Call", "Left Message", "Notes"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "projectId", "userId", "eventName", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User documents"
+    },
+    "/users/{userId}/projects/{projectId}": {
+      "schema": "Project",
+      "description": "User research projects"
+    },
+    "/users/{userId}/projects/{projectId}/events/{eventId}": {
+      "schema": "SavedEvent",
+      "description": "Events within a project"
+    }
+  }
+}

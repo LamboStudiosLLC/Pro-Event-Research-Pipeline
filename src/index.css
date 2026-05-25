@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #06b6d4; /* cyan-500 */
+  --color-secondary: #0891b2; /* cyan-600 */
+  --color-background: #030712;
+  --color-glass: rgba(255, 255, 255, 0.03);
+  --color-border: rgba(255, 255, 255, 0.1);
+}
+
+:root {
+  background-color: var(--color-background);
+  color: #e2e8f0; /* slate-200 */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.mesh-bg {
+  background: 
+    radial-gradient(at 0% 0%, hsla(215, 98%, 61%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, hsla(190, 98%, 61%, 0.1) 0px, transparent 50%),
+    #030712;
+}
+
+.glass {
+  background: var(--color-glass);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.row-hover:hover {
+  background: rgba(6, 182, 212, 0.1);
+}
+
+.glow-text {
+  text-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
