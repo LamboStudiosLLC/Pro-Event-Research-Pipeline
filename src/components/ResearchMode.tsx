@@ -1415,42 +1415,66 @@ Pro Event Research Team`;
           </div>
 
           {/* Navigation Tabs */}
-          <div className="shrink-0 flex border-b border-white/5 p-1 bg-zinc-950/20 rounded-xl gap-1">
+          <div className="shrink-0 flex border border-white/5 p-1 bg-zinc-950/45 rounded-2xl gap-1 shadow-[inset_0_2px_8px_rgba(0,0,0,0.8)]">
             <button
               type="button"
               onClick={() => setLeftActiveTab('cue')}
               className={cn(
-                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                "flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none border",
                 leftActiveTab === 'cue'
-                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                  ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)] hover:scale-[1.02] active:scale-[0.98]"
+                  : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200 hover:from-zinc-850 hover:to-zinc-900 hover:border-white/10"
               )}
             >
-              Cue ({researchCue.length})
+              <span>Cue</span>
+              <span className={cn(
+                "px-1.5 py-0.5 text-[9px] font-bold rounded-md border",
+                leftActiveTab === 'cue'
+                  ? "bg-black/60 text-primary border-black/45 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.8)]"
+                  : "bg-zinc-950/80 text-zinc-500 border-white/5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]"
+              )}>
+                {researchCue.length}
+              </span>
             </button>
             <button
               type="button"
               onClick={() => setLeftActiveTab('scans')}
               className={cn(
-                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                "flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none border",
                 leftActiveTab === 'scans'
-                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                  ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)] hover:scale-[1.02] active:scale-[0.98]"
+                  : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200 hover:from-zinc-850 hover:to-zinc-900 hover:border-white/10"
               )}
             >
-              Scans ({scannedList.length})
+              <span>Scans</span>
+              <span className={cn(
+                "px-1.5 py-0.5 text-[9px] font-bold rounded-md border",
+                leftActiveTab === 'scans'
+                  ? "bg-black/60 text-primary border-black/45 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.8)]"
+                  : "bg-zinc-950/80 text-zinc-500 border-white/5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]"
+              )}>
+                {scannedList.length}
+              </span>
             </button>
             <button
               type="button"
               onClick={() => setLeftActiveTab('pipeline')}
               className={cn(
-                "flex-1 py-1.5 px-2 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none",
+                "flex-1 flex items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all text-center cursor-pointer select-none border",
                 leftActiveTab === 'pipeline'
-                  ? "bg-primary/10 text-primary border border-primary/20 shadow-sm"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                  ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)] hover:scale-[1.02] active:scale-[0.98]"
+                  : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200 hover:from-zinc-850 hover:to-zinc-900 hover:border-white/10"
               )}
             >
-              Pipeline ({savedEvents.length})
+              <span>Pipeline</span>
+              <span className={cn(
+                "px-1.5 py-0.5 text-[9px] font-bold rounded-md border",
+                leftActiveTab === 'pipeline'
+                  ? "bg-black/60 text-primary border-black/45 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.8)]"
+                  : "bg-zinc-950/80 text-zinc-500 border-white/5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]"
+              )}>
+                {savedEvents.length}
+              </span>
             </button>
           </div>
 
@@ -1757,21 +1781,21 @@ Pro Event Research Team`;
           </div>
 
           {/* AI Model Selection Dropdown */}
-          <div className="relative flex shrink-0">
+          <div className="relative flex shrink-0 w-[140px]">
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               disabled={loading}
-              className="h-12 bg-[#0c0d12]/90 border border-white/10 rounded-xl px-4 pr-10 text-xs text-primary font-bold focus:ring-1 focus:ring-primary outline-none cursor-pointer appearance-none transition-colors hover:border-white/20"
+              className="w-full h-12 bg-[#0c0d12]/90 border border-white/10 rounded-xl px-3 pr-8 text-xs text-primary font-bold focus:ring-1 focus:ring-primary outline-none cursor-pointer appearance-none transition-colors hover:border-white/20"
             >
               <option value="gemini-3.5-flash" className="bg-[#030712] text-slate-300 font-bold">
-                ⚡ Gemini 3.5 Flash
+                ⚡ Gemini 3.5
               </option>
               <option value="gemini-3.1-flash-lite" className="bg-[#030712] text-slate-300">
-                🌱 Gemini 3.1 Lite (Affordable)
+                🌱 Gemini 3.1 Lite
               </option>
             </select>
-            <ChevronDown className="h-3.5 w-3.5 absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+            <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
           </div>
 
           <div className="relative flex shrink-0">

@@ -406,8 +406,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
   return (
     <div className="flex-1 w-full h-full flex flex-col gap-4">
-      {/* Dynamic Header & Actions Bar (Share Buttons Removed) */}
-      <div className="flex items-center justify-between bg-zinc-950/40 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
+      {/* Dynamic Header & Actions Bar with Filters (Merged to save space) */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-950/45 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
+        {/* Left: Project title and count */}
         <div className="flex flex-col min-w-0">
           <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Project Loaded</span>
           <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2 mt-0.5 truncate select-text">
@@ -415,70 +416,70 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
             <span className="text-[10px] text-slate-500 font-mono font-normal">({events.length} tracked items)</span>
           </h2>
         </div>
-      </div>
 
-      {/* Control panel for filters and sorting */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-zinc-950/20 border border-white/5 rounded-2xl p-4 shrink-0 shadow-md">
-        {/* Left Side: Status Filters */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-mono mr-1.5">Show:</span>
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-              statusFilter === 'all'
-                ? "bg-primary/20 border border-primary/30 text-primary font-bold"
-                : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
-            )}
-          >
-            All ({events.filter(e => STAGES.some(s => s.id === e.status)).length})
-          </button>
-          {STAGES.map(stage => {
-            const count = events.filter(e => e.status === stage.id).length;
-            return (
-              <button
-                key={stage.id}
-                onClick={() => setStatusFilter(stage.id)}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
-                  statusFilter === stage.id
-                    ? "bg-primary/20 border border-primary/30 text-primary font-bold"
-                    : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
-                )}
-              >
-                {stage.label} ({count})
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Side: Sorting Options */}
-        <div className="flex items-center gap-3 self-end md:self-auto">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
-            <select
-              value={sortField}
-              onChange={(e) => setSortField(e.target.value as any)}
-              className="bg-zinc-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-primary/45 cursor-pointer font-sans"
+        {/* Right side group: Filters + Sorting */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap">
+          {/* Status Filters */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-mono mr-1">Show:</span>
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={cn(
+                "px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                statusFilter === 'all'
+                  ? "bg-primary/20 border border-primary/30 text-primary font-bold"
+                  : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+              )}
             >
-              <option value="createdAt" className="bg-[#030712]">Date Scanned</option>
-              <option value="eventName" className="bg-[#030712]">Name (A-Z)</option>
-              <option value="status" className="bg-[#030712]">Pipeline Status</option>
-              <option value="date" className="bg-[#030712]">Event Date</option>
-            </select>
+              All ({events.filter(e => STAGES.some(s => s.id === e.status)).length})
+            </button>
+            {STAGES.map(stage => {
+              const count = events.filter(e => e.status === stage.id).length;
+              return (
+                <button
+                  key={stage.id}
+                  onClick={() => setStatusFilter(stage.id)}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer",
+                    statusFilter === stage.id
+                      ? "bg-primary/20 border border-primary/30 text-primary font-bold"
+                      : "bg-white/5 border border-white/5 text-slate-400 hover:text-white hover:bg-white/10"
+                  )}
+                >
+                  {stage.label} ({count})
+                </button>
+              );
+            })}
           </div>
 
-          <button
-            onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
-            className="flex items-center justify-center p-1.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer"
-            title={sortDirection === 'asc' ? "Sort Ascending" : "Sort Descending"}
-          >
-            {sortDirection === 'asc' ? (
-              <ArrowUp className="h-4 w-4" />
-            ) : (
-              <ArrowDown className="h-4 w-4" />
-            )}
-          </button>
+          {/* Sorting Options */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+              <select
+                value={sortField}
+                onChange={(e) => setSortField(e.target.value as any)}
+                className="bg-zinc-950 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-primary/45 cursor-pointer font-sans"
+              >
+                <option value="createdAt" className="bg-[#030712]">Date Scanned</option>
+                <option value="eventName" className="bg-[#030712]">Name (A-Z)</option>
+                <option value="status" className="bg-[#030712]">Pipeline Status</option>
+                <option value="date" className="bg-[#030712]">Event Date</option>
+              </select>
+            </div>
+
+            <button
+              onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="flex items-center justify-center p-1.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer"
+              title={sortDirection === 'asc' ? "Sort Ascending" : "Sort Descending"}
+            >
+              {sortDirection === 'asc' ? (
+                <ArrowUp className="h-3.5 w-3.5" />
+              ) : (
+                <ArrowDown className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
 

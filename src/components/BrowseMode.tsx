@@ -421,15 +421,15 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           {/* Target type selection */}
           <div className="space-y-1.5 shrink-0">
             <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Search Target</span>
-            <div className="grid grid-cols-2 gap-1.5 bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+            <div className="grid grid-cols-2 gap-1 bg-zinc-950/45 p-1 rounded-xl border border-white/5 shadow-[inset_0_2px_8px_rgba(0,0,0,0.8)]">
               <button
                 type="button"
                 onClick={() => { setSearchType('event'); setCategory(''); }}
                 className={cn(
-                  "py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer select-none transition-all",
+                  "py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer select-none transition-all border",
                   searchType === 'event'
-                    ? "bg-primary/10 text-primary border border-primary/20"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                    ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)] hover:scale-[1.02] active:scale-[0.98]"
+                    : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200 hover:from-zinc-850 hover:to-zinc-900 hover:border-white/10"
                 )}
               >
                 <Calendar className="h-3.5 w-3.5" />
@@ -439,10 +439,10 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                 type="button"
                 onClick={() => { setSearchType('vendor'); setCategory(''); }}
                 className={cn(
-                  "py-1.5 px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer select-none transition-all",
+                  "py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer select-none transition-all border",
                   searchType === 'vendor'
-                    ? "bg-primary/10 text-primary border border-primary/20"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                    ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)] hover:scale-[1.02] active:scale-[0.98]"
+                    : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200 hover:from-zinc-850 hover:to-zinc-900 hover:border-white/10"
                 )}
               >
                 <Briefcase className="h-3.5 w-3.5" />
