@@ -5,6 +5,7 @@ export interface EventContact {
   email?: string;
   phone?: string;
   social?: string;
+  manuallyAdded?: boolean;
 }
 
 export interface ActionNote {
@@ -55,4 +56,28 @@ export interface ResearchCueItem {
   isSandbox?: boolean;
 }
 
-export type Mode = 'browse' | 'research' | 'pipeline';
+export type Mode = 'browse' | 'research' | 'pipeline' | 'admin';
+
+export type UserRole = 'salesperson' | 'admin';
+
+export interface UserProfile {
+  userId: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role: UserRole;
+  createdAt: any;
+}
+
+export interface ClaimedLead {
+  claimId: string;
+  eventName: string;
+  website: string;
+  normalizedDomain: string;
+  normalizedName: string;
+  searchType: 'event' | 'vendor';
+  claimedBy: string;
+  claimedByName: string;
+  claimedAt: any;
+  status: 'Initial' | 'Contacted' | 'Responded' | 'Hot & Ready' | 'Declined';
+}

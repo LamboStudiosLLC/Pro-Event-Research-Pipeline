@@ -3,15 +3,16 @@ import { Mode, Project } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db, logout } from '@/src/lib/firebase';
 import { collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, getDocs } from 'firebase/firestore';
-import { 
-  Search, 
-  Layers, 
-  ChevronDown, 
-  Plus, 
-  LogOut, 
+import {
+  Search,
+  Layers,
+  ChevronDown,
+  Plus,
+  LogOut,
   User as UserIcon,
   Zap,
-  Trash2
+  Trash2,
+  Shield
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -24,7 +25,8 @@ interface NavigationProps {
 }
 
 const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId, setActiveProjectId }) => {
-  const { user } = useFirebase();
+  const { user, profile } = useFirebase();
+  const isAdmin = profile?.role === 'admin';
   const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectOpen, setIsProjectOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -155,7 +157,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
           >
             Research
           </button>
-          <button 
+          <button
             type="button"
             onClick={() => setMode('pipeline')}
             className={cn(
@@ -169,8 +171,24 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
       </div>
 
       <div className="flex items-center gap-6 h-full">
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setMode('admin')}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
+              mode === 'admin'
+                ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white"
+            )}
+          >
+            <Shield className="h-3.5 w-3.5" />
+            Admin Dashboard
+          </button>
+        )}
+
         <div className="relative h-full flex items-center">
-          <button 
+          <button
             type="button"
             onClick={() => setIsProjectOpen(!isProjectOpen)}
             className="flex items-center gap-2 cursor-pointer group text-sm"

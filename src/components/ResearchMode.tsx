@@ -385,13 +385,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
   const handleAddContact = async (role: string, name: string, email: string, phone: string, social: string) => {
     if (!result) return;
-    const newContact = { 
-      role, 
-      name, 
-      email, 
-      phone, 
-      social, 
-      contactInfo: [email, phone, social].filter(Boolean).join(' | ') 
+    const newContact = {
+      role,
+      name,
+      email,
+      phone,
+      social,
+      contactInfo: [email, phone, social].filter(Boolean).join(' | '),
+      manuallyAdded: true,
     };
     const updatedContacts = [...(result.contacts || []), newContact];
     const updatedResult = {
@@ -414,12 +415,13 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     if (evId && user && activeProjectId) {
       try {
         const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
-        await setDoc(eventRef, {
-          contacts: updatedContacts
-        }, { merge: true });
+        await setDoc(eventRef, { contacts: updatedContacts }, { merge: true });
       } catch (err) {
         console.error("Failed to add contact to saved event:", err);
       }
+    } else {
+      // No saved event yet — persist to scans so contacts survive navigation
+      await saveToScans(updatedResult);
     }
   };
 
@@ -706,6 +708,38 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     return () => unsubscribe();
   }, [user, activeProjectId]);
 
+  // If the lead is already in the pipeline, update it with fresh scan data
+  // while preserving pipeline-specific fields (status, notes, actionNotes, etc.)
+  const syncScanToPipeline = async (data: ResearchResult) => {
+    if (!user || !activeProjectId) return;
+    const existing = savedEvents.find(e =>
+      e.eventName.toLowerCase() === data.eventName.toLowerCase() ||
+      e.eventId === (data as any).eventId
+    );
+    if (!existing) return;
+    try {
+      const manualContacts = (existing.contacts || []).filter(c => c.manuallyAdded);
+      const mergedContacts = [
+        ...(data.contacts || []),
+        ...manualContacts.filter(mc =>
+          !(data.contacts || []).some(sc => sc.name.toLowerCase() === mc.name.toLowerCase())
+        )
+      ];
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', existing.eventId);
+      await setDoc(eventRef, {
+        contacts: mergedContacts,
+        description: data.description || existing.description,
+        date: data.date || existing.date,
+        location: data.location || existing.location,
+        website: data.website || existing.website,
+        logoUrl: data.logoUrl || existing.logoUrl,
+        yearFounded: data.yearFounded || existing.yearFounded,
+      }, { merge: true });
+    } catch (err) {
+      console.error('Failed to sync scan to pipeline:', err);
+    }
+  };
+
   const saveToScans = async (data: ResearchResult) => {
     if (!user || !activeProjectId || !data || !data.eventName) return;
     try {
@@ -850,8 +884,13 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       try {
         await new Promise(resolve => setTimeout(resolve, 1200));
         const data = getSimulatedResult(item.eventName, item.searchType || 'event');
+        const manualContacts = (result?.contacts || []).filter(c => c.manuallyAdded);
+        if (manualContacts.length > 0) {
+          data.contacts = [...(data.contacts || []), ...manualContacts];
+        }
         setResult(data);
         await saveToScans(data);
+        await syncScanToPipeline(data);
         setSpendingCapError(null);
         if (item.cueId && user && activeProjectId) {
           await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
@@ -890,8 +929,13 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         }
         throw new Error(data.details || data.error);
       }
+      const manualContacts = (result?.contacts || []).filter(c => c.manuallyAdded);
+      if (manualContacts.length > 0) {
+        data.contacts = [...(data.contacts || []), ...manualContacts];
+      }
       setResult(data);
       await saveToScans(data);
+      await syncScanToPipeline(data);
       setSpendingCapError(null);
       if (item.cueId && user && activeProjectId) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
@@ -971,10 +1015,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       });
       setIsSaved(true);
 
-      // Remove the scan from the Scan list after moving to Pipeline list (saved to events)
+      // Remove from scans list and research cue after saving to pipeline
       const scanInList = scannedList.find(s => s.eventName.toLowerCase() === result.eventName.toLowerCase());
       if (scanInList) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'scans', scanInList.scanId));
+      }
+      const cueItem = researchCue.find(c => c.eventName.toLowerCase() === result.eventName.toLowerCase());
+      if (cueItem) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue', cueItem.cueId));
       }
     } catch (e) {
       console.error(e);
@@ -1496,6 +1544,26 @@ Pro Event Research Team`;
                           onClick={() => {
                             setQueryText(ev.eventName);
                             setSearchType(ev.searchType || 'event');
+                            // Load from scanned list or saved events if available
+                            const scanned = scannedList.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                            const saved = savedEvents.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                            if (scanned) {
+                              setResult(scanned);
+                            } else if (saved) {
+                              setResult(saved);
+                            } else {
+                              // Stub so the panel renders without needing a scan
+                              setResult({
+                                eventName: ev.eventName,
+                                website: ev.website || '',
+                                date: '',
+                                location: '',
+                                description: '',
+                                contacts: [],
+                                searchType: ev.searchType || 'event',
+                                isSandbox: ev.isSandbox || false,
+                              });
+                            }
                           }}
                           className={cn(
                             "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
@@ -2374,88 +2442,89 @@ Pro Event Research Team`;
                         );
                       })}
 
-                      {/* Add Custom Contact Form Row */}
-                      {isAddingContact && (
-                        <tr className="bg-white/[0.03] border-t-2 border-primary/50">
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Title / Role (e.g. CEO)"
-                              value={newContactRole}
-                              onChange={(e) => setNewContactRole(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-primary/50 font-medium"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Contact Name"
-                              value={newContactName}
-                              onChange={(e) => setNewContactName(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-primary/50 font-medium"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Email Address"
-                              value={newContactEmail}
-                              onChange={(e) => setNewContactEmail(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Phone Number"
-                              value={newContactPhone}
-                              onChange={(e) => setNewContactPhone(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                            />
-                          </td>
-                          <td className="p-2.5" colSpan={2}>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                placeholder="Social profile URL"
-                                value={newContactSocial}
-                                onChange={(e) => setNewContactSocial(e.target.value)}
-                                className="flex-1 bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                              />
-                              <div className="flex gap-1 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={submitNewContact}
-                                  className="px-2.5 py-1 bg-primary hover:bg-secondary text-slate-900 rounded font-bold text-xs transition-all cursor-pointer"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsAddingContact(false);
-                                    setNewContactRole('');
-                                    setNewContactName('');
-                                    setNewContactEmail('');
-                                    setNewContactPhone('');
-                                    setNewContactSocial('');
-                                  }}
-                                  className="p-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer text-xs"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
-                {/* Double click instruction moved under the contacts box */}
-                <div className="mt-1.5 text-right">
-                  <span className="text-[9.5px] text-slate-550 font-mono">Double-click any cell to edit the text inline</span>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-[9.5px] text-slate-550 font-mono">Double-click any cell to edit inline</span>
+                  {!isAddingContact && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingContact(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Contact
+                    </button>
+                  )}
                 </div>
+
+                {/* Add Contact Form Panel */}
+                {isAddingContact && (
+                  <div className="mt-3 p-4 bg-[#0c0d12]/60 border border-primary/30 rounded-xl space-y-3">
+                    <p className="text-[10px] uppercase tracking-wider text-primary font-bold">New Contact</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Title / Role (e.g. CEO) *"
+                        value={newContactRole}
+                        onChange={(e) => setNewContactRole(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-primary/50 font-medium"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Contact Name *"
+                        value={newContactName}
+                        onChange={(e) => setNewContactName(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-primary/50 font-medium"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Email Address"
+                        value={newContactEmail}
+                        onChange={(e) => setNewContactEmail(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Phone Number"
+                        value={newContactPhone}
+                        onChange={(e) => setNewContactPhone(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Social / LinkedIn URL"
+                        value={newContactSocial}
+                        onChange={(e) => setNewContactSocial(e.target.value)}
+                        className="col-span-2 bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={submitNewContact}
+                        className="px-4 py-2 bg-primary hover:bg-primary/80 text-slate-900 rounded-lg font-bold text-xs transition-all cursor-pointer"
+                      >
+                        Save Contact
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingContact(false);
+                          setNewContactRole('');
+                          setNewContactName('');
+                          setNewContactEmail('');
+                          setNewContactPhone('');
+                          setNewContactSocial('');
+                        }}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer text-xs font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Collapsible Action Notes History list section */}
@@ -2535,18 +2604,9 @@ Pro Event Research Team`;
                 )}
               </div>
 
-              {/* Add Contact/Note control row */}
+              {/* Note control row */}
               <div className="flex flex-col items-center justify-center py-4 bg-[#0c0d12]/40 rounded-xl border border-white/5 space-y-4">
                 <div className="flex items-center gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingContact(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary hover:text-white border border-primary/20 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add Contact
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => {

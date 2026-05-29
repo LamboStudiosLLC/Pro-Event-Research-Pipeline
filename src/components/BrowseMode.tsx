@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, query as fsQuery, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where } from 'firebase/firestore';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -21,7 +21,8 @@ import {
   ChevronRight,
   ArrowRight
 } from 'lucide-react';
-import { Mode } from '@/src/types';
+import { Mode, ClaimedLead } from '@/src/types';
+import { isLeadMatch, normalizeDomain, normalizeName, isClaimExpired } from '@/src/lib/leadMatching';
 
 interface BrowseModeProps {
   activeProjectId: string | null;
@@ -216,6 +217,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const [researchCue, setResearchCue] = useState<ResearchCueItem[]>([]);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [simulationMode, setSimulationMode] = useState<boolean>(() => localStorage.getItem('research_sim_mode') === 'true');
+  const [claimedLeads, setClaimedLeads] = useState<ClaimedLead[]>([]);
 
   const minPct = (minAttendance - 10) / (150000 - 10);
   const maxPct = (maxAttendance - 10) / (150000 - 10);
@@ -238,6 +240,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
     });
     return () => unsubscribe();
   }, [user, activeProjectId]);
+
+  // Subscribe to company-wide claimed leads
+  useEffect(() => {
+    const unsub = onSnapshot(fsQuery(collection(db, 'claimed_leads')), (snap) => {
+      setClaimedLeads(snap.docs.map(d => ({ claimId: d.id, ...d.data() } as ClaimedLead)));
+    });
+    return () => unsub();
+  }, []);
 
   const handleSearch = async (e?: React.FormEvent, isNextPage = false) => {
     if (e) e.preventDefault();
@@ -300,16 +310,21 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           isSandbox: true
         }));
 
+        // Filter out claimed leads from sandbox results too
+        const activeClaimedLeadsSandbox = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+        const availableSandbox = withSandbox.filter((r: BrowseResult) =>
+          !activeClaimedLeadsSandbox.some(cl => isLeadMatch(r, cl))
+        );
+
         // Handle paging in mock simulation
         if (isNextPage) {
-          // Add some page index variation to names for clarity
-          const pageMock = withSandbox.map(item => ({
+          const pageMock = availableSandbox.map(item => ({
             ...item,
             eventName: `${item.eventName} (Page ${nextPage})`
           }));
           setResults(prev => [...prev, ...pageMock]);
         } else {
-          setResults(withSandbox);
+          setResults(availableSandbox);
         }
       } catch (err: any) {
         setErrorMessage(err.message || "Simulation mode failure.");
@@ -346,10 +361,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
 
       const data = await response.json();
       if (data && data.results) {
+        const activeClaimedLeads = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+        const available = data.results.filter((r: BrowseResult) =>
+          !activeClaimedLeads.some(cl => isLeadMatch(r, cl))
+        );
         if (isNextPage) {
-          setResults(prev => [...prev, ...data.results]);
+          setResults(prev => [...prev, ...available]);
         } else {
-          setResults(data.results);
+          setResults(available);
         }
       } else {
         throw new Error("Invalid results format returned from API.");
@@ -385,14 +404,20 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
 
     const existing = researchCue.find(c => c.eventName.toLowerCase() === item.eventName.toLowerCase());
     if (existing) {
-      // Remove from cue
+      // Unclaim: remove from cue and company claimed_leads registry
       try {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue', existing.cueId));
+        const claimSnap = await getDocs(fsQuery(
+          collection(db, 'claimed_leads'),
+          where('claimedBy', '==', user.uid),
+          where('normalizedName', '==', normalizeName(item.eventName))
+        ));
+        await Promise.all(claimSnap.docs.map(d => deleteDoc(d.ref)));
       } catch (err) {
-        console.error("Failed to remove cue item:", err);
+        console.error("Failed to unclaim lead:", err);
       }
     } else {
-      // Save to cue
+      // Claim: add to research cue and company claimed_leads registry
       try {
         await addDoc(collection(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue'), {
           eventName: item.eventName,
@@ -402,8 +427,19 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           isSandbox: item.isSandbox || false,
           createdAt: serverTimestamp()
         });
+        await addDoc(collection(db, 'claimed_leads'), {
+          eventName: item.eventName,
+          website: item.website || '',
+          normalizedDomain: normalizeDomain(item.website || ''),
+          normalizedName: normalizeName(item.eventName),
+          searchType: searchType,
+          claimedBy: user.uid,
+          claimedByName: user.displayName || user.email || '',
+          claimedAt: serverTimestamp(),
+          status: 'Initial',
+        });
       } catch (err) {
-        console.error("Failed to save cue item:", err);
+        console.error("Failed to claim lead:", err);
       }
     }
   };
@@ -815,13 +851,13 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                         >
                           {isInCue ? (
                             <>
-                              <Check className="h-3.5 w-3.5 text-primary group-hover:hidden" />
-                              <span className="group-hover:hidden">Added to Cue</span>
+                              <Check className="h-3.5 w-3.5 text-primary" />
+                              <span>Claimed</span>
                             </>
                           ) : (
                             <>
                               <Plus className="h-3.5 w-3.5 text-slate-400" />
-                              <span>Add to Research Cue</span>
+                              <span>Claim Lead</span>
                             </>
                           )}
                         </button>
