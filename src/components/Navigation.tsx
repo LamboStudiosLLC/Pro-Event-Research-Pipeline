@@ -145,7 +145,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'browse' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Browse
+            Get Leads
           </button>
           <button 
             type="button"
@@ -155,7 +155,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'research' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Research
+            Refine Leads
           </button>
           <button
             type="button"
@@ -165,7 +165,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'pipeline' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Pipeline
+            Track Leads
           </button>
         </div>
       </div>

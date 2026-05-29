@@ -252,6 +252,22 @@ interface ResearchModeProps {
   setActiveProjectId?: (id: string | null) => void;
 }
 
+const formatDate = (raw: string): string => {
+  if (!raw) return '';
+  const rangeParts = raw.split(' – ');
+  if (rangeParts.length === 2) {
+    const [s, e] = rangeParts.map(p => new Date(p.trim() + 'T00:00:00'));
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return raw;
+    if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
+      return `${s.toLocaleDateString('en-US', { month: 'long' })} ${s.getDate()}–${e.getDate()}, ${s.getFullYear()}`;
+    }
+    return `${s.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} – ${e.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+  }
+  const d = new Date(raw + 'T00:00:00');
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
 const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveProjectId }) => {
   const { user } = useFirebase();
   const [queryText, setQueryText] = useState('');
@@ -972,11 +988,17 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
-  const handleDeleteCueItem = async (cueId: string, e: React.MouseEvent) => {
+  const handleDeleteCueItem = async (cueId: string, eventName: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user || !activeProjectId) return;
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', cueId));
+      const claimSnap = await getDocs(fsQuery(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid),
+        where('normalizedName', '==', normalizeName(eventName))
+      ));
+      await Promise.all(claimSnap.docs.map(d => deleteDoc(d.ref)));
     } catch (err) {
       console.error(err);
     }
@@ -1610,7 +1632,7 @@ Pro Event Research Team`;
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => handleDeleteCueItem(ev.cueId, e)}
+                            onClick={(e) => handleDeleteCueItem(ev.cueId, ev.eventName, e)}
                             className="p-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
                             title="Remove from cue"
                           >
@@ -1665,7 +1687,7 @@ Pro Event Research Team`;
                             )}
                           </div>
                           <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
+                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
                           </span>
                           {ev.isSandbox && (
                             <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
@@ -1717,7 +1739,7 @@ Pro Event Research Team`;
                         >
                           <span className="truncate w-full block font-semibold text-white select-text">{ev.eventName}</span>
                           <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
+                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
                           </span>
                           {ev.isSandbox && (
                             <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
@@ -2148,7 +2170,7 @@ Pro Event Research Team`;
                       {result.searchType === 'vendor' ? (
                         <>
                           <Briefcase className="h-3.5 w-3.5 text-primary/75 shrink-0" />
-                          <span className="text-slate-400">Services:</span> {result.date}
+                          <span className="text-slate-400">Services:</span> {formatDate(result.date)}
                         </>
                       ) : (
                         <>
@@ -2167,7 +2189,7 @@ Pro Event Research Team`;
                       ) : (
                         <>
                           <Calendar className="h-3 w-3 text-primary/75 shrink-0" />
-                          {result.date}
+                          {formatDate(result.date)}
                         </>
                       )}
                     </span>
