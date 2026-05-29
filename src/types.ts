@@ -29,12 +29,15 @@ export interface ResearchResult {
   isSandbox?: boolean;
 }
 
+export type ResponseOutcome = 'Interested' | 'Maybe' | 'Not Interested';
+
 export interface SavedEvent extends ResearchResult {
   eventId: string;
   projectId: string;
   userId: string;
   notes: string;
-  status: 'Initial' | 'Contacted' | 'Responded' | 'Hot & Ready' | 'Declined';
+  status: 'Initial' | 'Contacted' | 'Responded';
+  responseOutcome?: ResponseOutcome | null;
   contactMethod?: string;
   createdAt: any;
 }
@@ -79,5 +82,6 @@ export interface ClaimedLead {
   claimedBy: string;
   claimedByName: string;
   claimedAt: any;
-  status: 'Initial' | 'Contacted' | 'Responded' | 'Hot & Ready' | 'Declined';
+  status: 'Initial' | 'Contacted' | 'Responded';
+  responseOutcome?: ResponseOutcome | null;
 }

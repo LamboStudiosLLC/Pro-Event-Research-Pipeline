@@ -10,11 +10,9 @@ import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
 
 const STATUS_COLORS: Record<string, string> = {
-  'Initial':     'bg-slate-500/20 text-slate-300 border-slate-500/20',
-  'Contacted':   'bg-blue-500/20 text-blue-300 border-blue-500/20',
-  'Responded':   'bg-yellow-500/20 text-yellow-300 border-yellow-500/20',
-  'Hot & Ready': 'bg-green-500/20 text-green-300 border-green-500/20',
-  'Declined':    'bg-red-500/20 text-red-400 border-red-500/20',
+  'Initial':   'bg-slate-500/20 text-slate-300 border-slate-500/20',
+  'Contacted': 'bg-blue-500/20 text-blue-300 border-blue-500/20',
+  'Responded': 'bg-teal-500/20 text-teal-300 border-teal-500/20',
 };
 
 // ─── Salesperson Detail View ────────────────────────────────────────────────
@@ -88,9 +86,9 @@ const SalespersonDetail: React.FC<DetailViewProps> = ({ user, leads, onBack }) =
           <p className="text-xl font-bold text-blue-300">{contactedCount}</p>
         </div>
         <div className="glass rounded-xl p-3 border border-white/10">
-          <p className="text-xs text-slate-400 mb-1">Hot & Ready</p>
+          <p className="text-xs text-slate-400 mb-1">Interested</p>
           <p className="text-xl font-bold text-green-300">
-            {leads.filter(l => l.status === 'Hot & Ready').length}
+            {leads.filter(l => l.responseOutcome === 'Interested').length}
           </p>
         </div>
       </div>
@@ -215,7 +213,7 @@ const AdminMode: React.FC = () => {
   }
 
   const totalLeads = claimedLeads.length;
-  const hotLeads = claimedLeads.filter(l => l.status === 'Hot & Ready').length;
+  const hotLeads = claimedLeads.filter(l => l.responseOutcome === 'Interested').length;
 
   return (
     <div className="space-y-6">
@@ -243,7 +241,7 @@ const AdminMode: React.FC = () => {
         <div className="glass rounded-2xl p-4 border border-white/10">
           <div className="flex items-center gap-3 mb-2">
             <CheckCircle className="h-5 w-5 text-green-400" />
-            <span className="text-sm text-slate-400">Hot & Ready</span>
+            <span className="text-sm text-slate-400">Interested</span>
           </div>
           <p className="text-2xl font-bold text-white">{hotLeads}</p>
         </div>
@@ -292,7 +290,7 @@ const AdminMode: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-semibold text-green-300">
-                      {leads.filter(l => l.status === 'Hot & Ready').length}
+                      {leads.filter(l => l.responseOutcome === 'Interested').length}
                     </p>
                     <p className="text-xs text-slate-500">hot</p>
                   </div>

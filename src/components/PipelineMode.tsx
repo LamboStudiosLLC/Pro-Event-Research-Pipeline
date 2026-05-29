@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { SavedEvent } from '@/src/types';
+import { SavedEvent, ResponseOutcome } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
@@ -32,9 +32,9 @@ interface PipelineModeProps {
 }
 
 const STAGES = [
-  { id: 'Initial', label: 'Not Started', icon: Clock, color: 'text-gray-450' },
-  { id: 'Contacted', label: 'Contacted', icon: Mail, color: 'text-blue-400' },
-  { id: 'Responded', label: 'Responded', icon: MessageSquare, color: 'text-yellow-400' }
+  { id: 'Initial',   label: 'Not Started', icon: Clock,         color: 'text-gray-400' },
+  { id: 'Contacted', label: 'Contacted',   icon: Mail,          color: 'text-blue-400' },
+  { id: 'Responded', label: 'Responded',   icon: MessageSquare, color: 'text-yellow-400' },
 ];
 
 const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
@@ -172,9 +172,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   };
 
   const downloadHotAndReadyCSV = () => {
-    const hotReadyEvents = events.filter(e => e.status === 'Hot & Ready');
+    const hotReadyEvents = events.filter(e => e.responseOutcome === 'Interested');
     if (hotReadyEvents.length === 0) {
-      alert("No 'Hot & Ready' events or vendors in this pipeline to export.");
+      alert("No 'Interested' events or vendors in this pipeline to export.");
       return;
     }
 
@@ -295,25 +295,11 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     return () => unsubscribe();
   }, [user, activeProjectId]);
 
-  const updateStatus = async (eventId: string, newStatus: SavedEvent['status']) => {
-    if (!user || !activeProjectId) return;
-
-    // Update pipeline event first — isolated so a claimed_leads failure can't block it
+  const syncClaimedLeadStatus = async (event: SavedEvent, fields: object) => {
     try {
-      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
-      await updateDoc(eventRef, { status: newStatus });
-    } catch (e) {
-      console.error('Failed to update pipeline status:', e);
-      return;
-    }
-
-    // Sync to company-wide claimed_leads so the admin dashboard reflects live progress
-    try {
-      const event = events.find(e => e.eventId === eventId);
-      if (!event) return;
       const claimSnap = await getDocs(query(
         collection(db, 'claimed_leads'),
-        where('claimedBy', '==', user.uid)
+        where('claimedBy', '==', user!.uid)
       ));
       const matches = claimSnap.docs.filter(d =>
         isLeadMatch(
@@ -321,10 +307,39 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
           { eventName: d.data().eventName, website: d.data().website }
         )
       );
-      await Promise.all(matches.map(d => updateDoc(d.ref, { status: newStatus })));
+      await Promise.all(matches.map(d => updateDoc(d.ref, fields)));
     } catch (e) {
       console.error('Failed to sync status to claimed_leads:', e);
     }
+  };
+
+  const updateStatus = async (eventId: string, newStatus: SavedEvent['status']) => {
+    if (!user || !activeProjectId) return;
+    try {
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      // Leaving Responded clears any prior responseOutcome
+      const fields: any = { status: newStatus };
+      if (newStatus !== 'Responded') fields.responseOutcome = null;
+      await updateDoc(eventRef, fields);
+    } catch (e) {
+      console.error('Failed to update pipeline status:', e);
+      return;
+    }
+    const event = events.find(e => e.eventId === eventId);
+    if (event) await syncClaimedLeadStatus(event, { status: newStatus, responseOutcome: newStatus !== 'Responded' ? null : event.responseOutcome ?? null });
+  };
+
+  const updateResponseOutcome = async (eventId: string, outcome: ResponseOutcome | null) => {
+    if (!user || !activeProjectId) return;
+    try {
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      await updateDoc(eventRef, { responseOutcome: outcome });
+    } catch (e) {
+      console.error('Failed to update response outcome:', e);
+      return;
+    }
+    const event = events.find(e => e.eventId === eventId);
+    if (event) await syncClaimedLeadStatus(event, { responseOutcome: outcome });
   };
 
   const updateContactMethod = async (eventId: string, contactMethod: string) => {
@@ -508,10 +523,10 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
       {/* Table Header Row */}
       <div className="hidden md:grid grid-cols-12 gap-3 items-center w-full px-5 py-2.5 bg-zinc-950/40 border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono mt-1 shrink-0">
-         <span className="col-span-4">Event / Vendor Name</span>
-         <span className="col-span-2">Type</span>
-         <span className="col-span-3">Date / Location / Services</span>
-         <span className="col-span-2 text-right">Pipeline Status</span>
+        <span className="col-span-4">Event / Vendor Name</span>
+        <span className="col-span-1">Type</span>
+        <span className="col-span-3">Date / Location</span>
+        <span className="col-span-3 text-right">Pipeline Status</span>
         <span className="col-span-1 text-right">Actions</span>
       </div>
 
@@ -531,6 +546,7 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
                 selectedEventId={selectedEventId}
                 setSelectedEventId={setSelectedEventId}
                 updateStatus={updateStatus}
+                updateResponseOutcome={updateResponseOutcome}
                 updateContactMethod={updateContactMethod}
                 updateNotes={updateNotes}
                 updateActionNotes={updateActionNotes}
