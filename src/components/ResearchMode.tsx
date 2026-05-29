@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ResearchResult, SavedEvent, ActionNote, ResearchCueItem } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, serverTimestamp, setDoc, doc, query as fsQuery, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, setDoc, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where, updateDoc } from 'firebase/firestore';
+import { normalizeName, normalizeDomain } from '@/src/lib/leadMatching';
 import { 
   Search, 
   MapPin, 
@@ -872,6 +873,27 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
+  // When a scan returns a different event name than the cue item (e.g. HubSpot INBOUND → UNBOUND),
+  // update the claimed_lead's metadata so future status syncs can find it correctly.
+  const syncClaimedLeadMetadata = async (originalName: string, scannedData: ResearchResult) => {
+    if (!user || scannedData.eventName === originalName) return;
+    try {
+      const snap = await getDocs(fsQuery(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid),
+        where('normalizedName', '==', normalizeName(originalName))
+      ));
+      await Promise.all(snap.docs.map(d => updateDoc(d.ref, {
+        eventName: scannedData.eventName,
+        website: scannedData.website || d.data().website,
+        normalizedName: normalizeName(scannedData.eventName),
+        normalizedDomain: normalizeDomain(scannedData.website || ''),
+      })));
+    } catch (e) {
+      console.error('Failed to sync claimed lead metadata:', e);
+    }
+  };
+
   const handleTriggerCueSearch = async (item: ResearchCueItem) => {
     setQueryText(item.eventName);
     setSearchType(item.searchType || 'event');
@@ -891,6 +913,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         setResult(data);
         await saveToScans(data);
         await syncScanToPipeline(data);
+        await syncClaimedLeadMetadata(item.eventName, data);
         setSpendingCapError(null);
         if (item.cueId && user && activeProjectId) {
           await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
@@ -936,6 +959,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       setResult(data);
       await saveToScans(data);
       await syncScanToPipeline(data);
+      await syncClaimedLeadMetadata(item.eventName, data);
       setSpendingCapError(null);
       if (item.cueId && user && activeProjectId) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));

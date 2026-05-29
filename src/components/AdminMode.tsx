@@ -257,9 +257,8 @@ const AdminMode: React.FC = () => {
           const contactedCount = leads.filter(l => l.status !== 'Initial').length;
 
           return (
-            <button
+            <div
               key={u.userId}
-              type="button"
               onClick={() => setSelectedUser(u)}
               className="w-full glass rounded-2xl border border-white/10 hover:border-white/20 transition-all cursor-pointer text-left"
             >
@@ -315,7 +314,7 @@ const AdminMode: React.FC = () => {
                   </div>
                 </div>
               </div>
-            </button>
+            </div>
           );
         })}
 

@@ -3,6 +3,7 @@ import { SavedEvent } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { isLeadMatch } from '@/src/lib/leadMatching';
 import { 
   ChevronRight, 
   MoreHorizontal, 
@@ -296,22 +297,33 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
   const updateStatus = async (eventId: string, newStatus: SavedEvent['status']) => {
     if (!user || !activeProjectId) return;
+
+    // Update pipeline event first — isolated so a claimed_leads failure can't block it
     try {
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
       await updateDoc(eventRef, { status: newStatus });
-
-      // Sync status to the company-wide claimed_leads registry so the admin sees live progress
-      const event = events.find(e => e.eventId === eventId);
-      if (event) {
-        const claimSnap = await getDocs(query(
-          collection(db, 'claimed_leads'),
-          where('claimedBy', '==', user.uid),
-          where('normalizedName', '==', event.eventName.toLowerCase().replace(/\b(20\d{2})\b/g, '').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim())
-        ));
-        await Promise.all(claimSnap.docs.map(d => updateDoc(d.ref, { status: newStatus })));
-      }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to update pipeline status:', e);
+      return;
+    }
+
+    // Sync to company-wide claimed_leads so the admin dashboard reflects live progress
+    try {
+      const event = events.find(e => e.eventId === eventId);
+      if (!event) return;
+      const claimSnap = await getDocs(query(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid)
+      ));
+      const matches = claimSnap.docs.filter(d =>
+        isLeadMatch(
+          { eventName: event.eventName, website: event.website },
+          { eventName: d.data().eventName, website: d.data().website }
+        )
+      );
+      await Promise.all(matches.map(d => updateDoc(d.ref, { status: newStatus })));
+    } catch (e) {
+      console.error('Failed to sync status to claimed_leads:', e);
     }
   };
 
