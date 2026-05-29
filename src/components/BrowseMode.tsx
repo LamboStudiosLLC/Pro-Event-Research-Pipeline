@@ -1,25 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where, writeBatch } from 'firebase/firestore';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Search, 
-  MapPin, 
-  Calendar, 
-  Tag, 
-  Users, 
-  Briefcase, 
-  Sparkles, 
-  ExternalLink, 
-  Plus, 
-  Check, 
+import * as XLSX from 'xlsx';
+import {
+  Search,
+  MapPin,
+  Calendar,
+  Tag,
+  Users,
+  Briefcase,
+  Sparkles,
+  ExternalLink,
+  Plus,
+  Check,
   RefreshCw,
   Globe,
   Sliders,
   ChevronRight,
-  ArrowRight
+  ArrowRight,
+  PenLine,
+  Compass,
+  Upload,
+  FileSpreadsheet,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 import { Mode, ClaimedLead } from '@/src/types';
 import { isLeadMatch, normalizeDomain, normalizeName, isClaimExpired } from '@/src/lib/leadMatching';
@@ -44,6 +51,19 @@ interface ResearchCueItem {
   searchType: 'event' | 'vendor';
   createdAt: any;
   isSandbox?: boolean;
+}
+
+interface ParsedImportRow {
+  eventName: string;
+  website: string;
+  servicesOffered: string;
+  location: string;
+  date: string;
+  contactName: string;
+  contactEmail: string;
+  contactRole: string;
+  searchType: 'event' | 'vendor';
+  isDuplicate: boolean;
 }
 
 const SECTOR_CATEGORIES = [
@@ -218,6 +238,20 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [simulationMode, setSimulationMode] = useState<boolean>(() => localStorage.getItem('research_sim_mode') === 'true');
   const [claimedLeads, setClaimedLeads] = useState<ClaimedLead[]>([]);
+
+  const [browseSubTab, setBrowseSubTab] = useState<'discover' | 'manual' | 'import'>('discover');
+  const [manualName, setManualName] = useState('');
+  const [manualWebsite, setManualWebsite] = useState('');
+  const [manualType, setManualType] = useState<'event' | 'vendor'>('event');
+  const [manualServices, setManualServices] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualSuccess, setManualSuccess] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importRows, setImportRows] = useState<ParsedImportRow[]>([]);
+  const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'preview' | 'importing' | 'done'>('idle');
+  const [importProgress, setImportProgress] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
 
   const minPct = (minAttendance - 10) / (150000 - 10);
   const maxPct = (maxAttendance - 10) / (150000 - 10);
@@ -444,10 +478,196 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
     }
   };
 
+  const get = (row: any, ...keys: string[]): string => {
+    for (const k of keys) {
+      const val = row[k];
+      if (val !== undefined && val !== null && val !== '') return String(val).trim();
+    }
+    return '';
+  };
+
+  const parseImportFile = async (file: File) => {
+    setImportStatus('parsing');
+    setImportRows([]);
+    try {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      const activeClaimedLeads = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+
+      const parsed: ParsedImportRow[] = raw
+        .map(row => {
+          const eventName = get(row, 'Event Name', 'Name', 'Title', 'Event');
+          if (!eventName) return null;
+
+          const website = get(row, 'Event Website', 'Organizer Website', 'Website', 'URL', 'Site');
+          const categories = get(row, 'Event Categories', 'Categories', 'Sector', 'Industry');
+          const eventType = get(row, 'Event Type', 'Type');
+          const servicesOffered = [categories, eventType].filter(Boolean).join(' · ')
+            || get(row, 'Description', 'Services', 'Focus', 'servicesOffered');
+
+          const startRaw = get(row, 'Start Date', 'Forecasted Start Date', 'Date', 'Start');
+          const endRaw = get(row, 'End Date', 'Forecasted End Date', 'End');
+          // Strip time component if present (xlsx with cellDates gives ISO strings)
+          const fmt = (s: string) => s.includes('T') ? s.split('T')[0] : s;
+          const date = startRaw && endRaw && fmt(startRaw) !== fmt(endRaw)
+            ? `${fmt(startRaw)} – ${fmt(endRaw)}`
+            : fmt(startRaw);
+
+          const city = get(row, 'City', 'Location');
+          const country = get(row, 'Country');
+          const location = [city, country].filter(Boolean).join(', ')
+            || get(row, 'Venue Address', 'Address', 'Region');
+
+          const contactName = get(row, 'Contact Person Name', 'Contact Name', 'Contact');
+          const contactEmail = get(row, 'Contact Person Email', 'Contact Email', 'Email');
+          const contactRole = get(row, 'Contact Person Designation', 'Designation', 'Role');
+
+          const isDuplicate = activeClaimedLeads.some(cl =>
+            isLeadMatch({ eventName, website }, { eventName: cl.eventName, website: cl.website })
+          );
+
+          return { eventName, website, servicesOffered, location, date, contactName, contactEmail, contactRole, searchType: 'event' as const, isDuplicate };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null) as ParsedImportRow[];
+
+      setImportRows(parsed);
+      setImportStatus('preview');
+    } catch (err) {
+      console.error('Failed to parse import file:', err);
+      setImportStatus('idle');
+      alert('Could not read that file. Make sure it is a valid .xlsx or .csv file.');
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    const toImport = importRows.filter(r => !r.isDuplicate);
+    if (!user || toImport.length === 0) return;
+
+    let targetProjectId = activeProjectId;
+    if (!targetProjectId) {
+      const name = prompt("Enter a project name to import these leads into:");
+      if (!name?.trim()) return;
+      try {
+        const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), {
+          userId: user.uid, name: name.trim(), createdAt: serverTimestamp(),
+        });
+        targetProjectId = docRef.id;
+      } catch { return; }
+    }
+
+    setImportStatus('importing');
+    setImportProgress(0);
+
+    const chunkSize = 200;
+    let done = 0;
+
+    for (let i = 0; i < toImport.length; i += chunkSize) {
+      const chunk = toImport.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+
+      for (const row of chunk) {
+        const contacts = row.contactName
+          ? [{ name: row.contactName, role: row.contactRole, email: row.contactEmail, contactInfo: row.contactEmail }]
+          : [];
+
+        const cueRef = doc(collection(db, 'users', user.uid, 'projects', targetProjectId!, 'research_cue'));
+        batch.set(cueRef, {
+          eventName: row.eventName,
+          website: row.website,
+          servicesOffered: row.servicesOffered,
+          searchType: row.searchType,
+          isSandbox: false,
+          createdAt: serverTimestamp(),
+        });
+
+        const claimRef = doc(collection(db, 'claimed_leads'));
+        batch.set(claimRef, {
+          eventName: row.eventName,
+          website: row.website,
+          normalizedDomain: normalizeDomain(row.website),
+          normalizedName: normalizeName(row.eventName),
+          searchType: row.searchType,
+          claimedBy: user.uid,
+          claimedByName: user.displayName || user.email || '',
+          claimedAt: serverTimestamp(),
+          status: 'Initial',
+        });
+      }
+
+      await batch.commit();
+      done += chunk.length;
+      setImportProgress(Math.round((done / toImport.length) * 100));
+    }
+
+    setImportStatus('done');
+  };
+
+  const resetImport = () => {
+    setImportRows([]);
+    setImportStatus('idle');
+    setImportProgress(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleManualAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualName.trim() || !user) return;
+    setManualSubmitting(true);
+
+    let targetProjectId = activeProjectId;
+    if (!targetProjectId) {
+      const name = prompt("Enter a project name to save this lead to:");
+      if (!name?.trim()) { setManualSubmitting(false); return; }
+      try {
+        const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), {
+          userId: user.uid,
+          name: name.trim(),
+          createdAt: serverTimestamp(),
+        });
+        targetProjectId = docRef.id;
+      } catch { setManualSubmitting(false); return; }
+    }
+
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue'), {
+        eventName: manualName.trim(),
+        website: manualWebsite.trim(),
+        servicesOffered: manualServices.trim(),
+        searchType: manualType,
+        isSandbox: false,
+        createdAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, 'claimed_leads'), {
+        eventName: manualName.trim(),
+        website: manualWebsite.trim(),
+        normalizedDomain: normalizeDomain(manualWebsite.trim()),
+        normalizedName: normalizeName(manualName.trim()),
+        searchType: manualType,
+        claimedBy: user.uid,
+        claimedByName: user.displayName || user.email || '',
+        claimedAt: serverTimestamp(),
+        status: 'Initial',
+      });
+      setManualName('');
+      setManualWebsite('');
+      setManualServices('');
+      setManualType('event');
+      setManualSuccess(true);
+      setTimeout(() => setManualSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to manually add lead:', err);
+    } finally {
+      setManualSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col md:flex-row flex-1 overflow-hidden h-full gap-6 select-text">
-      {/* Criteria search box (Left panel) */}
-      <aside className="w-full md:w-80 flex flex-col p-5 glass border-r shrink-0 rounded-2xl h-full overflow-hidden select-text">
+      {/* Criteria search box (Left panel) — hidden on Add Manually tab */}
+      {browseSubTab === 'discover' && <aside className="w-full md:w-80 flex flex-col p-5 glass border-r shrink-0 rounded-2xl h-full overflow-hidden select-text">
         <div className="flex items-center gap-2 mb-4 shrink-0">
           <Sliders className="h-4 w-4 text-primary" />
           <h2 className="text-xs uppercase tracking-widest text-slate-400 font-bold">Search Criteria</h2>
@@ -708,10 +928,312 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             </button>
           </div>
         </form>
-      </aside>
+      </aside>}
 
       {/* Results Workspace (Right panel) */}
       <main className="flex-1 overflow-hidden flex flex-col glass rounded-2xl h-full border border-white/10 select-text p-6">
+        {/* Sub-tab toggle */}
+        <div className="flex items-center gap-1 bg-zinc-950/50 border border-white/5 rounded-xl p-1 self-start mb-5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setBrowseSubTab('discover')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+              browseSubTab === 'discover'
+                ? "bg-primary/15 text-primary border border-primary/25"
+                : "text-slate-400 hover:text-white"
+            )}
+          >
+            <Compass className="h-3.5 w-3.5" />
+            Discover
+          </button>
+          <button
+            type="button"
+            onClick={() => setBrowseSubTab('manual')}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+              browseSubTab === 'manual'
+                ? "bg-primary/15 text-primary border border-primary/25"
+                : "text-slate-400 hover:text-white"
+            )}
+          >
+            <PenLine className="h-3.5 w-3.5" />
+            Add Manually
+          </button>
+          <button
+            type="button"
+            onClick={() => { setBrowseSubTab('import'); resetImport(); }}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+              browseSubTab === 'import'
+                ? "bg-primary/15 text-primary border border-primary/25"
+                : "text-slate-400 hover:text-white"
+            )}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Import File
+          </button>
+        </div>
+
+        {browseSubTab === 'import' ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="mb-5 shrink-0">
+              <h1 className="text-lg font-bold text-white leading-tight">Import from File</h1>
+              <p className="text-xs text-slate-400 mt-1">Upload a .xlsx or .csv export (e.g. from 10Times) to bulk-add leads to your Research Cue.</p>
+            </div>
+
+            {/* Idle / drop zone */}
+            {importStatus === 'idle' && (
+              <div
+                onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) parseImportFile(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-4 border-2 border-dashed rounded-2xl p-16 cursor-pointer transition-all",
+                  isDragging
+                    ? "border-primary/60 bg-primary/5"
+                    : "border-white/10 hover:border-white/20 hover:bg-white/[0.02]"
+                )}
+              >
+                <div className="p-4 bg-white/5 rounded-full border border-white/10">
+                  <FileSpreadsheet className="h-8 w-8 text-slate-400" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-white">Drop your file here</p>
+                  <p className="text-xs text-slate-500 mt-1">or click to browse — .xlsx or .csv</p>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) parseImportFile(f); }}
+                />
+              </div>
+            )}
+
+            {/* Parsing */}
+            {importStatus === 'parsing' && (
+              <div className="flex-1 flex items-center justify-center gap-3 text-slate-400">
+                <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-sm font-medium">Reading file...</span>
+              </div>
+            )}
+
+            {/* Preview */}
+            {importStatus === 'preview' && (() => {
+              const dupes = importRows.filter(r => r.isDuplicate).length;
+              const toImport = importRows.filter(r => !r.isDuplicate).length;
+              return (
+                <div className="flex-1 flex flex-col overflow-hidden gap-4">
+                  {/* Stats bar */}
+                  <div className="grid grid-cols-3 gap-3 shrink-0">
+                    <div className="glass rounded-xl p-3 border border-white/10 text-center">
+                      <p className="text-xl font-bold text-white">{importRows.length}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Rows Found</p>
+                    </div>
+                    <div className="glass rounded-xl p-3 border border-white/10 text-center">
+                      <p className="text-xl font-bold text-amber-300">{dupes}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Already Claimed</p>
+                    </div>
+                    <div className="glass rounded-xl p-3 border border-white/10 text-center">
+                      <p className="text-xl font-bold text-green-300">{toImport}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Will Be Added</p>
+                    </div>
+                  </div>
+
+                  {/* Preview table */}
+                  <div className="flex-1 overflow-auto custom-scrollbar rounded-xl border border-white/10">
+                    <table className="w-full text-[10px]">
+                      <thead className="bg-zinc-950/80 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider w-6"></th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Name</th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Website</th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Location</th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Date</th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Contact</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importRows.slice(0, 50).map((row, i) => (
+                          <tr key={i} className={cn(
+                            "border-t border-white/5",
+                            row.isDuplicate ? "opacity-40" : "hover:bg-white/[0.02]"
+                          )}>
+                            <td className="px-3 py-2">
+                              {row.isDuplicate && <span title="Already claimed"><AlertCircle className="h-3 w-3 text-amber-400" /></span>}
+                            </td>
+                            <td className="px-3 py-2 font-medium text-white max-w-[180px] truncate">{row.eventName}</td>
+                            <td className="px-3 py-2 text-slate-400 font-mono max-w-[140px] truncate">{row.website.replace(/^https?:\/\/(www\.)?/, '')}</td>
+                            <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate">{row.location}</td>
+                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{row.date}</td>
+                            <td className="px-3 py-2 text-slate-400 max-w-[130px] truncate">{row.contactName || '—'}</td>
+                          </tr>
+                        ))}
+                        {importRows.length > 50 && (
+                          <tr className="border-t border-white/5">
+                            <td colSpan={6} className="px-3 py-2 text-center text-slate-500 italic">
+                              ...and {importRows.length - 50} more rows
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      onClick={resetImport}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-400 hover:text-white font-semibold cursor-pointer transition-all"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={toImport === 0}
+                      onClick={handleConfirmImport}
+                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-primary/80 to-primary text-black py-2 px-4 rounded-xl font-bold cursor-pointer hover:from-primary hover:to-primary/95 text-xs transition-all disabled:opacity-50 disabled:pointer-events-none border border-primary/20"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      Import {toImport} Lead{toImport !== 1 ? 's' : ''} to Research Cue
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Importing progress */}
+            {importStatus === 'importing' && (
+              <div className="flex-1 flex flex-col items-center justify-center gap-6">
+                <div className="w-full max-w-sm space-y-3">
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>Importing leads...</span>
+                    <span className="font-mono text-primary">{importProgress}%</span>
+                  </div>
+                  <div className="w-full bg-white/5 rounded-full h-2 border border-white/5">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${importProgress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Done */}
+            {importStatus === 'done' && (
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+                <div className="p-4 bg-green-500/10 rounded-full border border-green-500/20">
+                  <Check className="h-8 w-8 text-green-400" />
+                </div>
+                <div>
+                  <p className="text-base font-bold text-white">Import Complete</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {importRows.filter(r => !r.isDuplicate).length} leads added to your Research Cue.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetImport}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs text-slate-300 hover:text-white font-semibold cursor-pointer transition-all"
+                >
+                  Import Another File
+                </button>
+              </div>
+            )}
+          </div>
+        ) : browseSubTab === 'manual' ? (
+          <div className="flex-1 flex items-start justify-center pt-8 overflow-y-auto custom-scrollbar">
+            <div className="w-full max-w-lg">
+              <div className="mb-6">
+                <h1 className="text-lg font-bold text-white leading-tight">Add a Lead Manually</h1>
+                <p className="text-xs text-slate-400 mt-1">Know of a lead already? Add it directly to your Research Cue without running an AI search.</p>
+              </div>
+              <form onSubmit={handleManualAdd} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Type</label>
+                  <div className="grid grid-cols-2 gap-1 bg-zinc-950/45 p-1 rounded-xl border border-white/5">
+                    {(['event', 'vendor'] as const).map(t => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setManualType(t)}
+                        className={cn(
+                          "py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all border",
+                          manualType === t
+                            ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)]"
+                            : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200"
+                        )}
+                      >
+                        {t === 'event' ? <Calendar className="h-3.5 w-3.5" /> : <Briefcase className="h-3.5 w-3.5" />}
+                        <span className="capitalize">{t === 'event' ? 'Events' : 'Vendors'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Name <span className="text-red-400">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Dreamforce 2026"
+                    value={manualName}
+                    onChange={e => setManualName(e.target.value)}
+                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Website</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. https://www.dreamforce.com"
+                    value={manualWebsite}
+                    onChange={e => setManualWebsite(e.target.value)}
+                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Description / Services</label>
+                  <textarea
+                    placeholder="Brief description, focus area, or services offered..."
+                    value={manualServices}
+                    onChange={e => setManualServices(e.target.value)}
+                    rows={3}
+                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium resize-none custom-scrollbar"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={manualSubmitting || !manualName.trim()}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary/80 to-primary text-black py-2.5 px-4 rounded-xl font-bold cursor-pointer hover:from-primary hover:to-primary/95 text-xs transition-all active:scale-98 disabled:opacity-50 disabled:pointer-events-none border border-primary/20"
+                >
+                  {manualSubmitting ? (
+                    <><RefreshCw className="h-3.5 w-3.5 animate-spin" /><span>Adding...</span></>
+                  ) : manualSuccess ? (
+                    <><Check className="h-3.5 w-3.5" /><span>Added to Research Cue!</span></>
+                  ) : (
+                    <><Plus className="h-3.5 w-3.5" /><span>Add to Research Cue</span></>
+                  )}
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+        <>
         <div className="flex items-center justify-between border-b border-white/5 pb-4 shrink-0">
           <div>
             <h1 className="text-lg font-bold text-white leading-tight">Criteria Database Search</h1>
@@ -891,6 +1413,8 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             </div>
           )}
         </div>
+        </>
+        )}
       </main>
     </div>
   );
