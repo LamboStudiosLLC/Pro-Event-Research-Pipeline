@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { SavedEvent } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where, query as fsQuery } from 'firebase/firestore';
 import { 
   ChevronRight, 
   MoreHorizontal, 
@@ -299,6 +299,17 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     try {
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
       await updateDoc(eventRef, { status: newStatus });
+
+      // Sync status to the company-wide claimed_leads registry so the admin sees live progress
+      const event = events.find(e => e.eventId === eventId);
+      if (event) {
+        const claimSnap = await getDocs(fsQuery(
+          collection(db, 'claimed_leads'),
+          where('claimedBy', '==', user.uid),
+          where('normalizedName', '==', event.eventName.toLowerCase().replace(/\b(20\d{2})\b/g, '').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim())
+        ));
+        await Promise.all(claimSnap.docs.map(d => updateDoc(d.ref, { status: newStatus })));
+      }
     } catch (e) {
       console.error(e);
     }
