@@ -436,8 +436,14 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     } else if (sortField === 'date') {
       const parseStartDate = (raw: string): number => {
         if (!raw) return 0;
-        // Take only the start portion of a range (before ' – ' or ' - ')
-        const start = raw.split(/\s[–-]\s/)[0].trim();
+        // "October 14-17, 2026" → "October 14, 2026"
+        const compact = raw.match(/^([A-Za-z]+ \d+)-\d+,?\s*(\d{4})/);
+        if (compact) {
+          const d = new Date(`${compact[1]}, ${compact[2]}`);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        }
+        // "March 15 – March 17, 2026" or "2025-03-15 – 2025-03-17"
+        const start = raw.split(/\s[–—-]\s/)[0].trim();
         const d = new Date(start + (start.match(/^\d{4}-\d{2}-\d{2}$/) ? 'T00:00:00' : ''));
         return isNaN(d.getTime()) ? 0 : d.getTime();
       };
