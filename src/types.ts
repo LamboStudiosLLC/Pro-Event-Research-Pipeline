@@ -5,6 +5,7 @@ export interface EventContact {
   email?: string;
   phone?: string;
   social?: string;
+  manuallyAdded?: boolean;
 }
 
 export interface ActionNote {
@@ -28,12 +29,15 @@ export interface ResearchResult {
   isSandbox?: boolean;
 }
 
+export type ResponseOutcome = 'Interested' | 'Maybe' | 'Not Interested';
+
 export interface SavedEvent extends ResearchResult {
   eventId: string;
   projectId: string;
   userId: string;
   notes: string;
-  status: 'Initial' | 'Contacted' | 'Responded' | 'Hot & Ready' | 'Declined';
+  status: 'Initial' | 'Contacted' | 'Responded';
+  responseOutcome?: ResponseOutcome | null;
   contactMethod?: string;
   createdAt: any;
 }
@@ -55,4 +59,29 @@ export interface ResearchCueItem {
   isSandbox?: boolean;
 }
 
-export type Mode = 'browse' | 'research' | 'pipeline';
+export type Mode = 'browse' | 'research' | 'pipeline' | 'admin';
+
+export type UserRole = 'salesperson' | 'admin';
+
+export interface UserProfile {
+  userId: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role: UserRole;
+  createdAt: any;
+}
+
+export interface ClaimedLead {
+  claimId: string;
+  eventName: string;
+  website: string;
+  normalizedDomain: string;
+  normalizedName: string;
+  searchType: 'event' | 'vendor';
+  claimedBy: string;
+  claimedByName: string;
+  claimedAt: any;
+  status: 'Initial' | 'Contacted' | 'Responded';
+  responseOutcome?: ResponseOutcome | null;
+}

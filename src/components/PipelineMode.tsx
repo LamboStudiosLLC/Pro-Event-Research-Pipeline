@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { SavedEvent } from '@/src/types';
+import { SavedEvent, ResponseOutcome } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { isLeadMatch } from '@/src/lib/leadMatching';
 import { 
-  ChevronRight, 
-  MoreHorizontal, 
-  MessageSquare, 
-  Phone, 
-  Mail, 
-  CheckCircle2, 
+  ChevronRight,
+  MoreHorizontal,
+  MessageSquare,
+  Phone,
+  Mail,
+  CheckCircle2,
   Trash2,
   Calendar,
   MapPin,
@@ -20,7 +21,10 @@ import {
   ArrowUp,
   ArrowDown,
   SlidersHorizontal,
-  ChevronUp
+  ChevronUp,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -31,9 +35,9 @@ interface PipelineModeProps {
 }
 
 const STAGES = [
-  { id: 'Initial', label: 'Not Started', icon: Clock, color: 'text-gray-450' },
-  { id: 'Contacted', label: 'Contacted', icon: Mail, color: 'text-blue-400' },
-  { id: 'Responded', label: 'Responded', icon: MessageSquare, color: 'text-yellow-400' }
+  { id: 'Initial',   label: 'Not Started', icon: Clock,         color: 'text-gray-400' },
+  { id: 'Contacted', label: 'Contacted',   icon: Mail,          color: 'text-blue-400' },
+  { id: 'Responded', label: 'Responded',   icon: MessageSquare, color: 'text-yellow-400' },
 ];
 
 const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
@@ -42,9 +46,12 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('');
 
-  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('createdAt');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+
+  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [statusFilter, setStatusFilter] = useState<string>('Initial');
 
   const expandedEvent = events.find(e => e.eventId === selectedEventId);
   const expandedStageId = expandedEvent ? expandedEvent.status : null;
@@ -171,9 +178,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   };
 
   const downloadHotAndReadyCSV = () => {
-    const hotReadyEvents = events.filter(e => e.status === 'Hot & Ready');
+    const hotReadyEvents = events.filter(e => e.responseOutcome === 'Interested');
     if (hotReadyEvents.length === 0) {
-      alert("No 'Hot & Ready' events or vendors in this pipeline to export.");
+      alert("No 'Interested' events or vendors in this pipeline to export.");
       return;
     }
 
@@ -294,14 +301,51 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     return () => unsubscribe();
   }, [user, activeProjectId]);
 
+  const syncClaimedLeadStatus = async (event: SavedEvent, fields: object) => {
+    try {
+      const claimSnap = await getDocs(query(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user!.uid)
+      ));
+      const matches = claimSnap.docs.filter(d =>
+        isLeadMatch(
+          { eventName: event.eventName, website: event.website },
+          { eventName: d.data().eventName, website: d.data().website }
+        )
+      );
+      await Promise.all(matches.map(d => updateDoc(d.ref, fields)));
+    } catch (e) {
+      console.error('Failed to sync status to claimed_leads:', e);
+    }
+  };
+
   const updateStatus = async (eventId: string, newStatus: SavedEvent['status']) => {
     if (!user || !activeProjectId) return;
     try {
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
-      await updateDoc(eventRef, { status: newStatus });
+      // Leaving Responded clears any prior responseOutcome
+      const fields: any = { status: newStatus };
+      if (newStatus !== 'Responded') fields.responseOutcome = null;
+      await updateDoc(eventRef, fields);
     } catch (e) {
-      console.error(e);
+      console.error('Failed to update pipeline status:', e);
+      return;
     }
+    const event = events.find(e => e.eventId === eventId);
+    if (event) await syncClaimedLeadStatus(event, { status: newStatus, responseOutcome: newStatus !== 'Responded' ? null : event.responseOutcome ?? null });
+  };
+
+  const updateResponseOutcome = async (eventId: string, outcome: ResponseOutcome | null) => {
+    if (!user || !activeProjectId) return;
+    try {
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      await updateDoc(eventRef, { responseOutcome: outcome });
+    } catch (e) {
+      console.error('Failed to update response outcome:', e);
+      return;
+    }
+    const event = events.find(e => e.eventId === eventId);
+    if (event) await syncClaimedLeadStatus(event, { responseOutcome: outcome });
   };
 
   const updateContactMethod = async (eventId: string, contactMethod: string) => {
@@ -311,6 +355,28 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
       await updateDoc(eventRef, { contactMethod });
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const saveProjectName = async () => {
+    const trimmed = editNameValue.trim();
+    if (!trimmed || !user || !activeProjectId) { setIsEditingName(false); return; }
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'projects', activeProjectId), { name: trimmed });
+      setProjectName(trimmed);
+    } catch (e) {
+      console.error('Failed to rename project:', e);
+    }
+    setIsEditingName(false);
+  };
+
+  const updateEventDetails = async (eventId: string, fields: Partial<SavedEvent>) => {
+    if (!user || !activeProjectId) return;
+    try {
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      await updateDoc(eventRef, fields as any);
+    } catch (e) {
+      console.error('Failed to update event details:', e);
     }
   };
 
@@ -386,8 +452,21 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
       valA = a.status || '';
       valB = b.status || '';
     } else if (sortField === 'date') {
-      valA = a.date || '';
-      valB = b.date || '';
+      const parseStartDate = (raw: string): number => {
+        if (!raw) return 0;
+        // "October 14–17, 2026" or "October 14-17, 2026" → "October 14, 2026"
+        const compact = raw.match(/^([A-Za-z]+ \d+)[–—-]\d+,?\s*(\d{4})/);
+        if (compact) {
+          const d = new Date(`${compact[1]}, ${compact[2]}`);
+          return isNaN(d.getTime()) ? 0 : d.getTime();
+        }
+        // "March 15 – March 17, 2026" or "2025-03-15 – 2025-03-17"
+        const start = raw.split(/\s[–—-]\s/)[0].trim();
+        const d = new Date(start + (start.match(/^\d{4}-\d{2}-\d{2}$/) ? 'T00:00:00' : ''));
+        return isNaN(d.getTime()) ? 0 : d.getTime();
+      };
+      valA = parseStartDate(a.date || '');
+      valB = parseStartDate(b.date || '');
     } else if (sortField === 'createdAt') {
       valA = (a as any).createdAt?.seconds || 0;
       valB = (b as any).createdAt?.seconds || 0;
@@ -408,13 +487,33 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     <div className="flex-1 w-full h-full flex flex-col gap-4">
       {/* Dynamic Header & Actions Bar with Filters (Merged to save space) */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-950/45 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
-        {/* Left: Project title and count */}
+        {/* Left: Project title */}
         <div className="flex flex-col min-w-0">
-          <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Project Loaded</span>
-          <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2 mt-0.5 truncate select-text">
-            {projectName || "Active Project Pipeline"}
-            <span className="text-[10px] text-slate-500 font-mono font-normal">({events.length} tracked items)</span>
-          </h2>
+          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Project</span>
+          {isEditingName ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={editNameValue}
+                onChange={e => setEditNameValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveProjectName(); if (e.key === 'Escape') setIsEditingName(false); }}
+                className="text-xl font-bold text-white bg-white/5 border border-primary/40 rounded-lg px-2 py-0.5 focus:outline-none focus:border-primary min-w-0 w-64"
+              />
+              <button onClick={saveProjectName} className="p-1 rounded text-green-400 hover:bg-white/5 cursor-pointer"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => setIsEditingName(false)} className="p-1 rounded text-slate-500 hover:bg-white/5 cursor-pointer"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ) : (
+            <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 truncate select-text">
+              {projectName || "Active Project Pipeline"}
+              <button
+                onClick={() => { setEditNameValue(projectName); setIsEditingName(true); }}
+                className="p-0.5 rounded text-slate-600 hover:text-slate-300 hover:bg-white/5 cursor-pointer transition-colors"
+                title="Rename project"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </h2>
+          )}
         </div>
 
         {/* Right side group: Filters + Sorting */}
@@ -485,10 +584,10 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
       {/* Table Header Row */}
       <div className="hidden md:grid grid-cols-12 gap-3 items-center w-full px-5 py-2.5 bg-zinc-950/40 border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono mt-1 shrink-0">
-         <span className="col-span-4">Event / Vendor Name</span>
-         <span className="col-span-2">Type</span>
-         <span className="col-span-3">Date / Location / Services</span>
-         <span className="col-span-2 text-right">Pipeline Status</span>
+        <span className="col-span-4">Event / Vendor Name</span>
+        <span className="col-span-1">Type</span>
+        <span className="col-span-3">Date / Location</span>
+        <span className="col-span-3 text-right">Pipeline Status</span>
         <span className="col-span-1 text-right">Actions</span>
       </div>
 
@@ -508,9 +607,11 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
                 selectedEventId={selectedEventId}
                 setSelectedEventId={setSelectedEventId}
                 updateStatus={updateStatus}
+                updateResponseOutcome={updateResponseOutcome}
                 updateContactMethod={updateContactMethod}
                 updateNotes={updateNotes}
                 updateActionNotes={updateActionNotes}
+                updateEventDetails={updateEventDetails}
                 deleteEvent={deleteEvent}
                 stages={STAGES}
                 projectName={projectName}

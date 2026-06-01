@@ -2,16 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { Mode, Project } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db, logout } from '@/src/lib/firebase';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, getDocs } from 'firebase/firestore';
-import { 
-  Search, 
-  Layers, 
-  ChevronDown, 
-  Plus, 
-  LogOut, 
+import { collection, query, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, getDocs, updateDoc } from 'firebase/firestore';
+import {
+  Search,
+  Layers,
+  ChevronDown,
+  Plus,
+  LogOut,
   User as UserIcon,
   Zap,
-  Trash2
+  Trash2,
+  Shield,
+  Pencil,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -24,7 +26,8 @@ interface NavigationProps {
 }
 
 const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId, setActiveProjectId }) => {
-  const { user } = useFirebase();
+  const { user, profile } = useFirebase();
+  const isAdmin = profile?.role === 'admin';
   const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectOpen, setIsProjectOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -91,36 +94,15 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
     }
   };
 
-  const handleResetApp = async () => {
+  const handleRenameProject = async (projId: string, currentName: string, event: React.MouseEvent) => {
+    event.stopPropagation();
     if (!user) return;
-    const confirmReset = confirm(
-      "CRITICAL WARNING:\n\nAre you sure you want to completely RESET the app?\n\nThis will permanently delete ALL projects, ALL scanned events, notes, and verify-scanned contacts. This action CANNOT be undone."
-    );
-    if (!confirmReset) return;
-
+    const newName = prompt("Rename project:", currentName);
+    if (!newName || newName.trim() === currentName) return;
     try {
-      // 1. Get all projects
-      const projectsRef = collection(db, 'users', user.uid, 'projects');
-      const projectsSnapshot = await getDocs(query(projectsRef));
-
-      // 2. Loop through each project to delete events and then the project itself
-      for (const projectDoc of projectsSnapshot.docs) {
-        const projId = projectDoc.id;
-        const eventsRef = collection(db, 'users', user.uid, 'projects', projId, 'events');
-        const eventsSnapshot = await getDocs(query(eventsRef));
-        const deleteEventsPromises = eventsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deleteEventsPromises);
-        await deleteDoc(projectDoc.ref);
-      }
-
-      // 3. Reset app active project state
-      setActiveProjectId(null);
-      setIsProjectOpen(false);
-      setIsProfileOpen(false);
-      alert("Application has been successfully reset! All projects and events have been deleted.");
-    } catch (err) {
-      console.error("Error resetting app:", err);
-      alert("An error occurred while resetting the app: " + (err as Error).message);
+      await updateDoc(doc(db, 'users', user.uid, 'projects', projId), { name: newName.trim() });
+    } catch (e) {
+      console.error("Error renaming project:", e);
     }
   };
 
@@ -143,7 +125,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'browse' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Browse
+            Get Leads
           </button>
           <button 
             type="button"
@@ -153,9 +135,9 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'research' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Research
+            Refine Leads
           </button>
-          <button 
+          <button
             type="button"
             onClick={() => setMode('pipeline')}
             className={cn(
@@ -163,14 +145,30 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'pipeline' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Pipeline
+            Track Leads
           </button>
         </div>
       </div>
 
       <div className="flex items-center gap-6 h-full">
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setMode('admin')}
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
+              mode === 'admin'
+                ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white"
+            )}
+          >
+            <Shield className="h-3.5 w-3.5" />
+            Admin Dashboard
+          </button>
+        )}
+
         <div className="relative h-full flex items-center">
-          <button 
+          <button
             type="button"
             onClick={() => setIsProjectOpen(!isProjectOpen)}
             className="flex items-center gap-2 cursor-pointer group text-sm"
@@ -205,14 +203,24 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                       )}
                     >
                       <span className="truncate pr-2 font-medium">{p.name}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteProject(p.projectId, e)}
-                        className="p-1 rounded bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/25 opacity-0 group-hover:opacity-100 transition-all cursor-pointer shrink-0"
-                        title="Delete project"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleRenameProject(p.projectId, p.name, e)}
+                          className="p-1 rounded bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white border border-white/10 cursor-pointer"
+                          title="Rename project"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteProject(p.projectId, e)}
+                          className="p-1 rounded bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/25 cursor-pointer"
+                          title="Delete project"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -223,14 +231,6 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                 >
                   <Plus className="h-4 w-4" />
                   New Project
-                </button>
-                <div className="h-px bg-white/5 my-1" />
-                <button 
-                  onClick={handleResetApp}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition-all text-left font-semibold"
-                >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                  Reset App
                 </button>
               </motion.div>
             )}
@@ -261,14 +261,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                 <div className="px-3 py-2 text-[10px] text-slate-500 truncate mb-1">
                   {user?.email}
                 </div>
-                <button 
-                  onClick={handleResetApp}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition-all text-left font-semibold"
-                >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                  Reset App
-                </button>
-                <button 
+                <button
                   onClick={() => logout()}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:bg-white/5 transition-all text-left font-medium"
                 >

@@ -2,14 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { ResearchResult, SavedEvent, ActionNote, ResearchCueItem } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, serverTimestamp, setDoc, doc, query as fsQuery, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, setDoc, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where, updateDoc } from 'firebase/firestore';
+import { normalizeName, normalizeDomain } from '@/src/lib/leadMatching';
 import { 
   Search, 
   MapPin, 
   Calendar, 
   Filter, 
-  Heart, 
-  Share2, 
+  Send,
+  Share2,
   Download, 
   Copy,
   PlusCircle,
@@ -251,6 +252,22 @@ interface ResearchModeProps {
   setActiveProjectId?: (id: string | null) => void;
 }
 
+const formatDate = (raw: string): string => {
+  if (!raw) return '';
+  const rangeParts = raw.split(' – ');
+  if (rangeParts.length === 2) {
+    const [s, e] = rangeParts.map(p => new Date(p.trim() + 'T00:00:00'));
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return raw;
+    if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
+      return `${s.toLocaleDateString('en-US', { month: 'long' })} ${s.getDate()}–${e.getDate()}, ${s.getFullYear()}`;
+    }
+    return `${s.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} – ${e.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+  }
+  const d = new Date(raw + 'T00:00:00');
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
 const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveProjectId }) => {
   const { user } = useFirebase();
   const [queryText, setQueryText] = useState('');
@@ -385,13 +402,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
   const handleAddContact = async (role: string, name: string, email: string, phone: string, social: string) => {
     if (!result) return;
-    const newContact = { 
-      role, 
-      name, 
-      email, 
-      phone, 
-      social, 
-      contactInfo: [email, phone, social].filter(Boolean).join(' | ') 
+    const newContact = {
+      role,
+      name,
+      email,
+      phone,
+      social,
+      contactInfo: [email, phone, social].filter(Boolean).join(' | '),
+      manuallyAdded: true,
     };
     const updatedContacts = [...(result.contacts || []), newContact];
     const updatedResult = {
@@ -414,12 +432,13 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     if (evId && user && activeProjectId) {
       try {
         const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
-        await setDoc(eventRef, {
-          contacts: updatedContacts
-        }, { merge: true });
+        await setDoc(eventRef, { contacts: updatedContacts }, { merge: true });
       } catch (err) {
         console.error("Failed to add contact to saved event:", err);
       }
+    } else {
+      // No saved event yet — persist to scans so contacts survive navigation
+      await saveToScans(updatedResult);
     }
   };
 
@@ -622,24 +641,31 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
   const handleDeleteContact = async (contactIdx: number) => {
     if (!result) return;
+    const contact = (result.contacts || [])[contactIdx];
+    if (!confirm(`Remove ${contact?.name || 'this contact'} from the contact sheet?`)) return;
+
     const updatedContacts = (result.contacts || []).filter((_, idx) => idx !== contactIdx);
-    const updatedResult = {
-      ...result,
-      contacts: updatedContacts
-    };
+    const updatedResult = { ...result, contacts: updatedContacts };
     setResult(updatedResult);
+
+    if (multipleResults.length > 0) {
+      setMultipleResults(multipleResults.map((item, idx) =>
+        idx === currentResultIndex || item.eventName === result.eventName
+          ? { ...item, contacts: updatedContacts }
+          : item
+      ));
+    }
 
     const evId = (result as any).eventId;
     if (evId && user && activeProjectId) {
       try {
         const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
-        await setDoc(eventRef, {
-          contacts: updatedContacts
-        }, { merge: true });
+        await setDoc(eventRef, { contacts: updatedContacts }, { merge: true });
       } catch (err) {
         console.error("Failed to delete contact from saved event:", err);
       }
     }
+    await saveToScans(updatedResult);
   };
 
   // Fetch saved events for A-Z list
@@ -705,6 +731,38 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     });
     return () => unsubscribe();
   }, [user, activeProjectId]);
+
+  // If the lead is already in the pipeline, update it with fresh scan data
+  // while preserving pipeline-specific fields (status, notes, actionNotes, etc.)
+  const syncScanToPipeline = async (data: ResearchResult) => {
+    if (!user || !activeProjectId) return;
+    const existing = savedEvents.find(e =>
+      e.eventName.toLowerCase() === data.eventName.toLowerCase() ||
+      e.eventId === (data as any).eventId
+    );
+    if (!existing) return;
+    try {
+      const manualContacts = (existing.contacts || []).filter(c => c.manuallyAdded);
+      const mergedContacts = [
+        ...(data.contacts || []),
+        ...manualContacts.filter(mc =>
+          !(data.contacts || []).some(sc => sc.name.toLowerCase() === mc.name.toLowerCase())
+        )
+      ];
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', existing.eventId);
+      await setDoc(eventRef, {
+        contacts: mergedContacts,
+        description: data.description || existing.description,
+        date: data.date || existing.date,
+        location: data.location || existing.location,
+        website: data.website || existing.website,
+        logoUrl: data.logoUrl || existing.logoUrl,
+        yearFounded: data.yearFounded || existing.yearFounded,
+      }, { merge: true });
+    } catch (err) {
+      console.error('Failed to sync scan to pipeline:', err);
+    }
+  };
 
   const saveToScans = async (data: ResearchResult) => {
     if (!user || !activeProjectId || !data || !data.eventName) return;
@@ -838,6 +896,27 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
+  // When a scan returns a different event name than the cue item (e.g. HubSpot INBOUND → UNBOUND),
+  // update the claimed_lead's metadata so future status syncs can find it correctly.
+  const syncClaimedLeadMetadata = async (originalName: string, scannedData: ResearchResult) => {
+    if (!user || scannedData.eventName === originalName) return;
+    try {
+      const snap = await getDocs(fsQuery(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid),
+        where('normalizedName', '==', normalizeName(originalName))
+      ));
+      await Promise.all(snap.docs.map(d => updateDoc(d.ref, {
+        eventName: scannedData.eventName,
+        website: scannedData.website || d.data().website,
+        normalizedName: normalizeName(scannedData.eventName),
+        normalizedDomain: normalizeDomain(scannedData.website || ''),
+      })));
+    } catch (e) {
+      console.error('Failed to sync claimed lead metadata:', e);
+    }
+  };
+
   const handleTriggerCueSearch = async (item: ResearchCueItem) => {
     setQueryText(item.eventName);
     setSearchType(item.searchType || 'event');
@@ -850,8 +929,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       try {
         await new Promise(resolve => setTimeout(resolve, 1200));
         const data = getSimulatedResult(item.eventName, item.searchType || 'event');
+        const manualContacts = (result?.contacts || []).filter(c => c.manuallyAdded);
+        if (manualContacts.length > 0) {
+          data.contacts = [...(data.contacts || []), ...manualContacts];
+        }
         setResult(data);
         await saveToScans(data);
+        await syncScanToPipeline(data);
+        await syncClaimedLeadMetadata(item.eventName, data);
         setSpendingCapError(null);
         if (item.cueId && user && activeProjectId) {
           await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
@@ -890,8 +975,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         }
         throw new Error(data.details || data.error);
       }
+      const manualContacts = (result?.contacts || []).filter(c => c.manuallyAdded);
+      if (manualContacts.length > 0) {
+        data.contacts = [...(data.contacts || []), ...manualContacts];
+      }
       setResult(data);
       await saveToScans(data);
+      await syncScanToPipeline(data);
+      await syncClaimedLeadMetadata(item.eventName, data);
       setSpendingCapError(null);
       if (item.cueId && user && activeProjectId) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
@@ -904,11 +995,17 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
-  const handleDeleteCueItem = async (cueId: string, e: React.MouseEvent) => {
+  const handleDeleteCueItem = async (cueId: string, eventName: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user || !activeProjectId) return;
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', cueId));
+      const claimSnap = await getDocs(fsQuery(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid),
+        where('normalizedName', '==', normalizeName(eventName))
+      ));
+      await Promise.all(claimSnap.docs.map(d => deleteDoc(d.ref)));
     } catch (err) {
       console.error(err);
     }
@@ -969,12 +1066,44 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         status: 'Initial',
         createdAt: serverTimestamp()
       });
-      setIsSaved(true);
 
-      // Remove the scan from the Scan list after moving to Pipeline list (saved to events)
+      // Remove from scans and cue
       const scanInList = scannedList.find(s => s.eventName.toLowerCase() === result.eventName.toLowerCase());
       if (scanInList) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'scans', scanInList.scanId));
+      }
+      const cueItem = researchCue.find(c => c.eventName.toLowerCase() === result.eventName.toLowerCase());
+      if (cueItem) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue', cueItem.cueId));
+      }
+
+      // Advance to next cue item, or clear the panel if the cue is empty
+      const remainingCue = researchCue.filter(c => c.eventName.toLowerCase() !== result.eventName.toLowerCase());
+      if (remainingCue.length > 0) {
+        const next = remainingCue[0];
+        setQueryText(next.eventName);
+        setSearchType(next.searchType || 'event');
+        const scanned = scannedList.find(s => s.eventName.toLowerCase() === next.eventName.toLowerCase());
+        const saved = savedEvents.find(s => s.eventName.toLowerCase() === next.eventName.toLowerCase());
+        if (scanned) {
+          setResult(scanned);
+        } else if (saved) {
+          setResult(saved);
+        } else {
+          setResult({
+            eventName: next.eventName,
+            website: next.website || '',
+            date: '',
+            location: '',
+            description: '',
+            contacts: [],
+            searchType: next.searchType || 'event',
+            isSandbox: false,
+          });
+        }
+      } else {
+        setResult(null);
+        setQueryText('');
       }
     } catch (e) {
       console.error(e);
@@ -1496,6 +1625,26 @@ Pro Event Research Team`;
                           onClick={() => {
                             setQueryText(ev.eventName);
                             setSearchType(ev.searchType || 'event');
+                            // Load from scanned list or saved events if available
+                            const scanned = scannedList.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                            const saved = savedEvents.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                            if (scanned) {
+                              setResult(scanned);
+                            } else if (saved) {
+                              setResult(saved);
+                            } else {
+                              // Stub so the panel renders without needing a scan
+                              setResult({
+                                eventName: ev.eventName,
+                                website: ev.website || '',
+                                date: '',
+                                location: '',
+                                description: '',
+                                contacts: [],
+                                searchType: ev.searchType || 'event',
+                                isSandbox: ev.isSandbox || false,
+                              });
+                            }
                           }}
                           className={cn(
                             "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
@@ -1518,7 +1667,7 @@ Pro Event Research Team`;
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => handleDeleteCueItem(ev.cueId, e)}
+                            onClick={(e) => handleDeleteCueItem(ev.cueId, ev.eventName, e)}
                             className="p-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
                             title="Remove from cue"
                           >
@@ -1573,7 +1722,7 @@ Pro Event Research Team`;
                             )}
                           </div>
                           <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
+                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
                           </span>
                           {ev.isSandbox && (
                             <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
@@ -1625,7 +1774,7 @@ Pro Event Research Team`;
                         >
                           <span className="truncate w-full block font-semibold text-white select-text">{ev.eventName}</span>
                           <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${ev.date}` : `${ev.location} • ${ev.date}`}
+                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
                           </span>
                           {ev.isSandbox && (
                             <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
@@ -2007,8 +2156,8 @@ Pro Event Research Team`;
                     isSaved ? "bg-red-500/10 text-red-500 border-red-500/20" : "bg-white/5 text-slate-400 border-white/10 hover:text-white"
                   )}
                 >
-                  <Heart className={cn("h-3 w-3", isSaved && "fill-current")} />
-                  <span>{isSaved ? "SAVED" : "SAVE TO PIPELINE"}</span>
+                  <Send className="h-3 w-3" />
+                  <span>{isSaved ? "IN PIPELINE" : "MOVE TO PIPELINE"}</span>
                 </button>
                 <button 
                   onClick={downloadCSV}
@@ -2056,7 +2205,7 @@ Pro Event Research Team`;
                       {result.searchType === 'vendor' ? (
                         <>
                           <Briefcase className="h-3.5 w-3.5 text-primary/75 shrink-0" />
-                          <span className="text-slate-400">Services:</span> {result.date}
+                          <span className="text-slate-400">Services:</span> {formatDate(result.date)}
                         </>
                       ) : (
                         <>
@@ -2075,7 +2224,7 @@ Pro Event Research Team`;
                       ) : (
                         <>
                           <Calendar className="h-3 w-3 text-primary/75 shrink-0" />
-                          {result.date}
+                          {formatDate(result.date)}
                         </>
                       )}
                     </span>
@@ -2111,7 +2260,7 @@ Pro Event Research Team`;
                       onClick={handleLinkedInVerify}
                       disabled={isVerifyingLinkedIn || !result || !result.contacts || result.contacts.length === 0}
                       className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 ${
-                        isVerifyingLinkedIn 
+                        isVerifyingLinkedIn
                           ? 'bg-slate-800 text-slate-400 cursor-not-allowed border-white/10'
                           : 'bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98]'
                       }`}
@@ -2119,7 +2268,7 @@ Pro Event Research Team`;
                       <Zap className={`h-3 w-3 shrink-0 ${isVerifyingLinkedIn ? 'animate-bounce text-slate-400' : 'text-primary animate-pulse'}`} />
                       {isVerifyingLinkedIn ? 'Enriching Data...' : 'LinkedIn Verify/Add Contacts'}
                     </button>
-                    <span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes, but often identifies more contact emails. Uses AI Credits.</span>
+<span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes, but often identifies more contact emails. Uses AI Credits.</span>
                   </div>
                 </div>
 
@@ -2374,88 +2523,89 @@ Pro Event Research Team`;
                         );
                       })}
 
-                      {/* Add Custom Contact Form Row */}
-                      {isAddingContact && (
-                        <tr className="bg-white/[0.03] border-t-2 border-primary/50">
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Title / Role (e.g. CEO)"
-                              value={newContactRole}
-                              onChange={(e) => setNewContactRole(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-primary/50 font-medium"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Contact Name"
-                              value={newContactName}
-                              onChange={(e) => setNewContactName(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-primary/50 font-medium"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Email Address"
-                              value={newContactEmail}
-                              onChange={(e) => setNewContactEmail(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                            />
-                          </td>
-                          <td className="p-2.5">
-                            <input
-                              type="text"
-                              placeholder="Phone Number"
-                              value={newContactPhone}
-                              onChange={(e) => setNewContactPhone(e.target.value)}
-                              className="w-full bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                            />
-                          </td>
-                          <td className="p-2.5" colSpan={2}>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                placeholder="Social profile URL"
-                                value={newContactSocial}
-                                onChange={(e) => setNewContactSocial(e.target.value)}
-                                className="flex-1 bg-zinc-950 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-white focus:outline-none focus:border-primary/50"
-                              />
-                              <div className="flex gap-1 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={submitNewContact}
-                                  className="px-2.5 py-1 bg-primary hover:bg-secondary text-slate-900 rounded font-bold text-xs transition-all cursor-pointer"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsAddingContact(false);
-                                    setNewContactRole('');
-                                    setNewContactName('');
-                                    setNewContactEmail('');
-                                    setNewContactPhone('');
-                                    setNewContactSocial('');
-                                  }}
-                                  className="p-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-slate-400 hover:text-white transition-all cursor-pointer text-xs"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
-                {/* Double click instruction moved under the contacts box */}
-                <div className="mt-1.5 text-right">
-                  <span className="text-[9.5px] text-slate-550 font-mono">Double-click any cell to edit the text inline</span>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span className="text-[9.5px] text-slate-550 font-mono">Double-click any cell to edit inline</span>
+                  {!isAddingContact && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingContact(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Contact
+                    </button>
+                  )}
                 </div>
+
+                {/* Add Contact Form Panel */}
+                {isAddingContact && (
+                  <div className="mt-3 p-4 bg-[#0c0d12]/60 border border-primary/30 rounded-xl space-y-3">
+                    <p className="text-[10px] uppercase tracking-wider text-primary font-bold">New Contact</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Title / Role (e.g. CEO) *"
+                        value={newContactRole}
+                        onChange={(e) => setNewContactRole(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-primary/50 font-medium"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Contact Name *"
+                        value={newContactName}
+                        onChange={(e) => setNewContactName(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-primary/50 font-medium"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Email Address"
+                        value={newContactEmail}
+                        onChange={(e) => setNewContactEmail(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Phone Number"
+                        value={newContactPhone}
+                        onChange={(e) => setNewContactPhone(e.target.value)}
+                        className="bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Social / LinkedIn URL"
+                        value={newContactSocial}
+                        onChange={(e) => setNewContactSocial(e.target.value)}
+                        className="col-span-2 bg-zinc-950 border border-white/10 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-primary/50"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={submitNewContact}
+                        className="px-4 py-2 bg-primary hover:bg-primary/80 text-slate-900 rounded-lg font-bold text-xs transition-all cursor-pointer"
+                      >
+                        Save Contact
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingContact(false);
+                          setNewContactRole('');
+                          setNewContactName('');
+                          setNewContactEmail('');
+                          setNewContactPhone('');
+                          setNewContactSocial('');
+                        }}
+                        className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer text-xs font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Collapsible Action Notes History list section */}
@@ -2535,18 +2685,9 @@ Pro Event Research Team`;
                 )}
               </div>
 
-              {/* Add Contact/Note control row */}
+              {/* Note control row */}
               <div className="flex flex-col items-center justify-center py-4 bg-[#0c0d12]/40 rounded-xl border border-white/5 space-y-4">
                 <div className="flex items-center gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingContact(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary hover:text-white border border-primary/20 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add Contact
-                  </button>
-
                   <button
                     type="button"
                     onClick={() => {
