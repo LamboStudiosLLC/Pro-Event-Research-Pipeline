@@ -43,9 +43,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('');
 
-  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('createdAt');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [statusFilter, setStatusFilter] = useState<string>('Initial');
 
   const expandedEvent = events.find(e => e.eventId === selectedEventId);
   const expandedStageId = expandedEvent ? expandedEvent.status : null;
