@@ -5,12 +5,12 @@ import { db } from '@/src/lib/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
 import { isLeadMatch } from '@/src/lib/leadMatching';
 import { 
-  ChevronRight, 
-  MoreHorizontal, 
-  MessageSquare, 
-  Phone, 
-  Mail, 
-  CheckCircle2, 
+  ChevronRight,
+  MoreHorizontal,
+  MessageSquare,
+  Phone,
+  Mail,
+  CheckCircle2,
   Trash2,
   Calendar,
   MapPin,
@@ -21,7 +21,10 @@ import {
   ArrowUp,
   ArrowDown,
   SlidersHorizontal,
-  ChevronUp
+  ChevronUp,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,6 +45,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const [events, setEvents] = useState<SavedEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('');
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
 
   const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -352,6 +358,18 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     }
   };
 
+  const saveProjectName = async () => {
+    const trimmed = editNameValue.trim();
+    if (!trimmed || !user || !activeProjectId) { setIsEditingName(false); return; }
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'projects', activeProjectId), { name: trimmed });
+      setProjectName(trimmed);
+    } catch (e) {
+      console.error('Failed to rename project:', e);
+    }
+    setIsEditingName(false);
+  };
+
   const updateEventDetails = async (eventId: string, fields: Partial<SavedEvent>) => {
     if (!user || !activeProjectId) return;
     try {
@@ -469,13 +487,33 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     <div className="flex-1 w-full h-full flex flex-col gap-4">
       {/* Dynamic Header & Actions Bar with Filters (Merged to save space) */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-950/45 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
-        {/* Left: Project title and count */}
+        {/* Left: Project title */}
         <div className="flex flex-col min-w-0">
-          <span className="text-[10px] text-primary font-mono uppercase tracking-widest font-bold">Project Loaded</span>
-          <h2 className="text-sm font-bold text-white tracking-tight flex items-center gap-2 mt-0.5 truncate select-text">
-            {projectName || "Active Project Pipeline"}
-            <span className="text-[10px] text-slate-500 font-mono font-normal">({events.length} tracked items)</span>
-          </h2>
+          <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Project</span>
+          {isEditingName ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={editNameValue}
+                onChange={e => setEditNameValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveProjectName(); if (e.key === 'Escape') setIsEditingName(false); }}
+                className="text-xl font-bold text-white bg-white/5 border border-primary/40 rounded-lg px-2 py-0.5 focus:outline-none focus:border-primary min-w-0 w-64"
+              />
+              <button onClick={saveProjectName} className="p-1 rounded text-green-400 hover:bg-white/5 cursor-pointer"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => setIsEditingName(false)} className="p-1 rounded text-slate-500 hover:bg-white/5 cursor-pointer"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ) : (
+            <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 truncate select-text">
+              {projectName || "Active Project Pipeline"}
+              <button
+                onClick={() => { setEditNameValue(projectName); setIsEditingName(true); }}
+                className="p-0.5 rounded text-slate-600 hover:text-slate-300 hover:bg-white/5 cursor-pointer transition-colors"
+                title="Rename project"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </h2>
+          )}
         </div>
 
         {/* Right side group: Filters + Sorting */}
