@@ -36,9 +36,9 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
     if (!user) return;
     const q = query(collection(db, 'users', user.uid, 'projects'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const projs = snapshot.docs.map(doc => ({ 
-        projectId: doc.id, 
-        ...doc.data() 
+      const projs = snapshot.docs.map(doc => ({
+        projectId: doc.id,
+        ...doc.data()
       } as Project));
       setProjects(projs);
       if (projs.length > 0 && !activeProjectId) {
@@ -67,7 +67,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
     event.stopPropagation();
     if (!user) return;
     if (!confirm("Are you sure you want to delete this project and all its scanned events? This action cannot be undone.")) return;
-    
+
     try {
       // 1. Get all events in the project to delete them first
       const eventsRef = collection(db, 'users', user.uid, 'projects', projId, 'events');
@@ -117,7 +117,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
         </div>
 
         <div className="flex items-center bg-zinc-900/80 rounded-full p-1 border border-white/5">
-          <button 
+          <button
             type="button"
             onClick={() => setMode('browse')}
             className={cn(
@@ -125,9 +125,9 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'browse' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            Get Leads
+            vance
           </button>
-          <button 
+          <button
             type="button"
             onClick={() => setMode('research')}
             className={cn(
@@ -178,10 +178,10 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
             </span>
             <ChevronDown className="h-4 w-4 text-slate-500" />
           </button>
-          
+
           <AnimatePresence>
             {isProjectOpen && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
@@ -197,8 +197,8 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                       }}
                       className={cn(
                         "w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs transition-all group cursor-pointer border border-transparent",
-                        activeProjectId === p.projectId 
-                          ? "bg-primary/20 text-primary border-primary/20" 
+                        activeProjectId === p.projectId
+                          ? "bg-primary/20 text-primary border-primary/20"
                           : "text-slate-400 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -225,7 +225,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                   ))}
                 </div>
                 <div className="h-px bg-white/5 my-2" />
-                <button 
+                <button
                   onClick={handleCreateProject}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 transition-all text-left"
                 >
@@ -238,7 +238,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
         </div>
 
         <div className="relative h-full flex items-center">
-          <button 
+          <button
             type="button"
             onClick={() => setIsProfileOpen(!isProfileOpen)}
             className="w-8 h-8 rounded-full bg-zinc-800 border border-white/10 flex items-center justify-center text-xs overflow-hidden cursor-pointer"
@@ -252,7 +252,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
 
           <AnimatePresence>
             {isProfileOpen && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}

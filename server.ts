@@ -11,7 +11,7 @@ const PORT = 3000;
 
 app.use(express.json());
 
-const ai = new GoogleGenAI({ 
+const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
     headers: {
@@ -22,14 +22,14 @@ const ai = new GoogleGenAI({
 
 // API Routes
 app.post("/api/browse", async (req, res) => {
-  const { 
-    searchType, 
-    dateRange, 
-    location, 
-    servicesOffered, 
-    category, 
-    attendanceRange, 
-    otherCriteria, 
+  const {
+    searchType,
+    dateRange,
+    location,
+    servicesOffered,
+    category,
+    attendanceRange,
+    otherCriteria,
     page,
     startDate,
     endDate,
@@ -37,7 +37,7 @@ app.post("/api/browse", async (req, res) => {
     maxAttendance,
     eventType
   } = req.body;
-  
+
   const currentPage = page || 1;
   const startIdx = (currentPage - 1) * 10 + 1;
   const endIdx = startIdx + 9;
@@ -57,8 +57,8 @@ app.post("/api/browse", async (req, res) => {
       - website: Official website URL (absolute, valid link).
       - servicesOffered: Standard, concise description of exactly what services they offer (e.g. "Scenic design, custom exhibit booth construction, event audio-visual production, event strategy").`;
     } else {
-      const formattedDates = (startDate || endDate) 
-        ? `Between ${startDate || 'unspecified start'} and ${endDate || 'unspecified end'}` 
+      const formattedDates = (startDate || endDate)
+        ? `Between ${startDate || 'unspecified start'} and ${endDate || 'unspecified end'}`
         : (dateRange || "Any time of year");
 
       const formattedAttendance = (minAttendance !== undefined || maxAttendance !== undefined)
@@ -255,13 +255,13 @@ app.post("/api/research", async (req, res) => {
     console.error("Research Error:", error);
     const errorMsg = error.message || "";
     const errorDetails = typeof error === 'object' ? JSON.stringify(error) : String(error);
-    
+
     let isSpendingCap = errorMsg.includes("spending cap") || errorMsg.includes("spend cap") || errorDetails.includes("spending cap") || errorDetails.includes("spend cap");
     let isQuota = errorMsg.includes("quota") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorDetails.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("429") || errorDetails.includes("429") || error.status === 429;
-    
+
     let responseCode = "RESEARCH_FAILED";
     let errorMessage = "Failed to research";
-    
+
     if (isSpendingCap) {
       responseCode = "SPENDING_CAP_EXCEEDED";
       errorMessage = "Google AI Studio Monthly Spending Cap Exceeded. Please raise your spending ceiling in the AI Studio spend cap dashboard.";
@@ -273,10 +273,10 @@ app.post("/api/research", async (req, res) => {
       errorMessage = "Your Gemini API key is missing or invalid. Please check your Settings > Secrets configuration.";
     }
 
-    res.status(isSpendingCap || isQuota ? 429 : 500).json({ 
-      error: errorMessage, 
+    res.status(isSpendingCap || isQuota ? 429 : 500).json({
+      error: errorMessage,
       code: responseCode,
-      details: error.message 
+      details: error.message
     });
   }
 });
@@ -414,7 +414,7 @@ app.post("/api/linkedin-verify", async (req, res) => {
     return res.status(400).json({ error: "Contacts array is required" });
   }
 
-  const apiKey = process.env.LINKUP_API_KEY || "16d6f1997fd74b43dd30abe5c6b057c5a1a0c2cff66ffea239c2cfccd0494b91";
+  const apiKey = process.env.LINKUP_API_KEY;
   const updatedContacts = [];
 
   console.log(`LinkedIn Verification request for ${contacts.length} contacts at ${companyName || 'Unknown company'}`);

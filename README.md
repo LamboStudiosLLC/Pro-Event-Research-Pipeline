@@ -18,3 +18,19 @@ View your app in AI Studio: https://ai.studio/apps/79dd206d-296b-432a-8d14-a05be
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Git Integration
+To link this project to your repository:
+```bash
+git remote add origin https://github.com/LamboStudiosLLC/Pro-Event-Research-Pipeline.git
+git branch -M main
+git push -u origin main
+```
+
+## Git Integration
+To link this project to your repository:
+```bash
+git remote add origin https://github.com/your-username/Pro-Event-Research-Pipeline.git
+git branch -M main
+git push -u origin main
+```
