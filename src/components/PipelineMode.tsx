@@ -434,8 +434,15 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
       valA = a.status || '';
       valB = b.status || '';
     } else if (sortField === 'date') {
-      valA = a.date || '';
-      valB = b.date || '';
+      const parseStartDate = (raw: string): number => {
+        if (!raw) return 0;
+        // Take only the start portion of a range (before ' – ' or ' - ')
+        const start = raw.split(/\s[–-]\s/)[0].trim();
+        const d = new Date(start + (start.match(/^\d{4}-\d{2}-\d{2}$/) ? 'T00:00:00' : ''));
+        return isNaN(d.getTime()) ? 0 : d.getTime();
+      };
+      valA = parseStartDate(a.date || '');
+      valB = parseStartDate(b.date || '');
     } else if (sortField === 'createdAt') {
       valA = (a as any).createdAt?.seconds || 0;
       valB = (b as any).createdAt?.seconds || 0;
