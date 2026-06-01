@@ -352,6 +352,16 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     }
   };
 
+  const updateEventDetails = async (eventId: string, fields: Partial<SavedEvent>) => {
+    if (!user || !activeProjectId) return;
+    try {
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      await updateDoc(eventRef, fields as any);
+    } catch (e) {
+      console.error('Failed to update event details:', e);
+    }
+  };
+
   const updateNotes = async (eventId: string, notes: string) => {
     if (!user || !activeProjectId) return;
     try {
@@ -550,6 +560,7 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
                 updateContactMethod={updateContactMethod}
                 updateNotes={updateNotes}
                 updateActionNotes={updateActionNotes}
+                updateEventDetails={updateEventDetails}
                 deleteEvent={deleteEvent}
                 stages={STAGES}
                 projectName={projectName}

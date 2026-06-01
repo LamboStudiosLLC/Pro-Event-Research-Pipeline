@@ -9,8 +9,8 @@ import {
   MapPin, 
   Calendar, 
   Filter, 
-  Heart, 
-  Share2, 
+  Send,
+  Share2,
   Download, 
   Copy,
   PlusCircle,
@@ -641,24 +641,31 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
   const handleDeleteContact = async (contactIdx: number) => {
     if (!result) return;
+    const contact = (result.contacts || [])[contactIdx];
+    if (!confirm(`Remove ${contact?.name || 'this contact'} from the contact sheet?`)) return;
+
     const updatedContacts = (result.contacts || []).filter((_, idx) => idx !== contactIdx);
-    const updatedResult = {
-      ...result,
-      contacts: updatedContacts
-    };
+    const updatedResult = { ...result, contacts: updatedContacts };
     setResult(updatedResult);
+
+    if (multipleResults.length > 0) {
+      setMultipleResults(multipleResults.map((item, idx) =>
+        idx === currentResultIndex || item.eventName === result.eventName
+          ? { ...item, contacts: updatedContacts }
+          : item
+      ));
+    }
 
     const evId = (result as any).eventId;
     if (evId && user && activeProjectId) {
       try {
         const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
-        await setDoc(eventRef, {
-          contacts: updatedContacts
-        }, { merge: true });
+        await setDoc(eventRef, { contacts: updatedContacts }, { merge: true });
       } catch (err) {
         console.error("Failed to delete contact from saved event:", err);
       }
     }
+    await saveToScans(updatedResult);
   };
 
   // Fetch saved events for A-Z list
@@ -1059,9 +1066,8 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         status: 'Initial',
         createdAt: serverTimestamp()
       });
-      setIsSaved(true);
 
-      // Remove from scans list and research cue after saving to pipeline
+      // Remove from scans and cue
       const scanInList = scannedList.find(s => s.eventName.toLowerCase() === result.eventName.toLowerCase());
       if (scanInList) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'scans', scanInList.scanId));
@@ -1069,6 +1075,35 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       const cueItem = researchCue.find(c => c.eventName.toLowerCase() === result.eventName.toLowerCase());
       if (cueItem) {
         await deleteDoc(doc(db, 'users', user.uid, 'projects', targetProjectId, 'research_cue', cueItem.cueId));
+      }
+
+      // Advance to next cue item, or clear the panel if the cue is empty
+      const remainingCue = researchCue.filter(c => c.eventName.toLowerCase() !== result.eventName.toLowerCase());
+      if (remainingCue.length > 0) {
+        const next = remainingCue[0];
+        setQueryText(next.eventName);
+        setSearchType(next.searchType || 'event');
+        const scanned = scannedList.find(s => s.eventName.toLowerCase() === next.eventName.toLowerCase());
+        const saved = savedEvents.find(s => s.eventName.toLowerCase() === next.eventName.toLowerCase());
+        if (scanned) {
+          setResult(scanned);
+        } else if (saved) {
+          setResult(saved);
+        } else {
+          setResult({
+            eventName: next.eventName,
+            website: next.website || '',
+            date: '',
+            location: '',
+            description: '',
+            contacts: [],
+            searchType: next.searchType || 'event',
+            isSandbox: false,
+          });
+        }
+      } else {
+        setResult(null);
+        setQueryText('');
       }
     } catch (e) {
       console.error(e);
@@ -2121,8 +2156,8 @@ Pro Event Research Team`;
                     isSaved ? "bg-red-500/10 text-red-500 border-red-500/20" : "bg-white/5 text-slate-400 border-white/10 hover:text-white"
                   )}
                 >
-                  <Heart className={cn("h-3 w-3", isSaved && "fill-current")} />
-                  <span>{isSaved ? "SAVED" : "SAVE TO PIPELINE"}</span>
+                  <Send className="h-3 w-3" />
+                  <span>{isSaved ? "IN PIPELINE" : "MOVE TO PIPELINE"}</span>
                 </button>
                 <button 
                   onClick={downloadCSV}
@@ -2225,7 +2260,7 @@ Pro Event Research Team`;
                       onClick={handleLinkedInVerify}
                       disabled={isVerifyingLinkedIn || !result || !result.contacts || result.contacts.length === 0}
                       className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 ${
-                        isVerifyingLinkedIn 
+                        isVerifyingLinkedIn
                           ? 'bg-slate-800 text-slate-400 cursor-not-allowed border-white/10'
                           : 'bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98]'
                       }`}
@@ -2233,7 +2268,7 @@ Pro Event Research Team`;
                       <Zap className={`h-3 w-3 shrink-0 ${isVerifyingLinkedIn ? 'animate-bounce text-slate-400' : 'text-primary animate-pulse'}`} />
                       {isVerifyingLinkedIn ? 'Enriching Data...' : 'LinkedIn Verify/Add Contacts'}
                     </button>
-                    <span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes, but often identifies more contact emails. Uses AI Credits.</span>
+<span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes, but often identifies more contact emails. Uses AI Credits.</span>
                   </div>
                 </div>
 

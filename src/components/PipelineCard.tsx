@@ -19,9 +19,29 @@ import {
   Minimize2,
   Share2,
   Copy,
+  Edit3,
+  Check,
+  X,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion } from "motion/react";
+
+const formatDate = (raw: string): string => {
+  if (!raw) return '';
+  const rangeParts = raw.split(' – ');
+  if (rangeParts.length === 2) {
+    const [s, e] = rangeParts.map(p => new Date(p.trim() + 'T00:00:00'));
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return raw;
+    if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear()) {
+      return `${s.toLocaleDateString('en-US', { month: 'long' })} ${s.getDate()}–${e.getDate()}, ${s.getFullYear()}`;
+    }
+    return `${s.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} – ${e.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+  }
+  const d = new Date(raw + 'T00:00:00');
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
 
 interface EmailTemplate {
   id: string;
@@ -169,6 +189,7 @@ interface PipelineCardProps {
     contactMethod: string,
   ) => Promise<void>;
   updateNotes: (eventId: string, notes: string) => Promise<void>;
+  updateEventDetails: (eventId: string, fields: Partial<SavedEvent>) => Promise<void>;
   updateActionNotes: (
     eventId: string,
     actionNotes: any[],
@@ -192,6 +213,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   updateContactMethod,
   updateNotes,
   updateActionNotes,
+  updateEventDetails,
   deleteEvent,
   stages,
   projectName,
@@ -203,6 +225,96 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [newNoteValue, setNewNoteValue] = useState("");
   const isExpanded = selectedEventId === event.eventId;
   const cardRef = useRef<HTMLDivElement>(null);
+
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editWebsite, setEditWebsite] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [isAddingContact, setIsAddingContact] = useState(false);
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactRole, setNewContactRole] = useState('');
+  const [newContactEmail, setNewContactEmail] = useState('');
+  const [newContactPhone, setNewContactPhone] = useState('');
+  const [newContactSocial, setNewContactSocial] = useState('');
+  const [editingContactIdx, setEditingContactIdx] = useState<number | null>(null);
+  const [editContactName, setEditContactName] = useState('');
+  const [editContactRole, setEditContactRole] = useState('');
+  const [editContactEmail, setEditContactEmail] = useState('');
+  const [editContactPhone, setEditContactPhone] = useState('');
+  const [editContactSocial, setEditContactSocial] = useState('');
+
+  const startEditingContact = (idx: number) => {
+    const c = (event.contacts || [])[idx];
+    setEditContactName(c.name || '');
+    setEditContactRole(c.role || '');
+    setEditContactEmail(c.email || '');
+    setEditContactPhone(c.phone || '');
+    setEditContactSocial(c.social || '');
+    setEditingContactIdx(idx);
+  };
+
+  const saveContactEdit = async () => {
+    if (editingContactIdx === null) return;
+    const updatedContacts = (event.contacts || []).map((c, i) =>
+      i === editingContactIdx ? {
+        ...c,
+        name: editContactName.trim(),
+        role: editContactRole.trim(),
+        email: editContactEmail.trim(),
+        phone: editContactPhone.trim(),
+        social: editContactSocial.trim(),
+        contactInfo: [editContactEmail.trim(), editContactPhone.trim(), editContactSocial.trim()].filter(Boolean).join(' | '),
+      } : c
+    );
+    await updateEventDetails(event.eventId, { contacts: updatedContacts });
+    setEditingContactIdx(null);
+  };
+
+  const startEditing = () => {
+    setEditName(event.eventName);
+    setEditDate(event.date || '');
+    setEditLocation(event.location || '');
+    setEditWebsite(event.website || '');
+    setEditDescription(event.description || '');
+    setIsEditingDetails(true);
+  };
+
+  const saveDetails = async () => {
+    await updateEventDetails(event.eventId, {
+      eventName: editName.trim() || event.eventName,
+      date: editDate.trim(),
+      location: editLocation.trim(),
+      website: editWebsite.trim(),
+      description: editDescription.trim(),
+    });
+    setIsEditingDetails(false);
+  };
+
+  const handleAddContact = async () => {
+    if (!newContactName.trim()) return;
+    const newContact = {
+      name: newContactName.trim(),
+      role: newContactRole.trim(),
+      email: newContactEmail.trim(),
+      phone: newContactPhone.trim(),
+      social: newContactSocial.trim(),
+      contactInfo: [newContactEmail.trim(), newContactPhone.trim(), newContactSocial.trim()].filter(Boolean).join(' | '),
+    };
+    const updatedContacts = [...(event.contacts || []), newContact];
+    await updateEventDetails(event.eventId, { contacts: updatedContacts });
+    setNewContactName(''); setNewContactRole(''); setNewContactEmail('');
+    setNewContactPhone(''); setNewContactSocial('');
+    setIsAddingContact(false);
+  };
+
+  const handleDeleteContact = async (idx: number) => {
+    const contact = (event.contacts || [])[idx];
+    if (!confirm(`Remove ${contact?.name || 'this contact'}?`)) return;
+    const updatedContacts = (event.contacts || []).filter((_, i) => i !== idx);
+    await updateEventDetails(event.eventId, { contacts: updatedContacts });
+  };
 
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [emailText, setEmailText] = useState("");
@@ -664,7 +776,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
             ) : (
               <Calendar className="h-3 w-3 text-primary/60 shrink-0" />
             )}
-            <span className="truncate">{event.date}</span>
+            <span className="truncate">{formatDate(event.date) || event.date}</span>
           </div>
           <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
             <MapPin className="h-3 w-3 text-primary/60 shrink-0" />
@@ -1004,60 +1116,85 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
               </div>
             ) : (
               <>
-                {/* Column 1: Record Overview Description */}
-                <div className="space-y-3 bg-black/35 p-3.5 rounded-xl border border-white/5 flex flex-col justify-between h-full select-text min-h-[320px]">
-                  <div className="space-y-2.5 select-text flex-1 flex flex-col h-full">
-                    <div className="flex items-center gap-2.5 select-text pb-1.5 border-b border-white/5 shrink-0">
+                {/* Column 1: Record Overview / Edit */}
+                <div className="space-y-3 bg-black/35 p-3.5 rounded-xl border border-white/5 flex flex-col h-full min-h-[320px]">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-white/5 shrink-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       {event.logoUrl ? (
-                        <img
-                          src={event.logoUrl}
-                          alt={event.eventName}
-                          referrerPolicy="no-referrer"
-                          className="w-9 h-9 rounded object-contain bg-white/5 p-0.5 shrink-0"
-                        />
+                        <img src={event.logoUrl} alt={event.eventName} referrerPolicy="no-referrer" className="w-8 h-8 rounded object-contain bg-white/5 p-0.5 shrink-0" />
                       ) : (
-                        <div className="w-9 h-9 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-center font-bold text-primary font-mono text-[11px] shrink-0">
-                          {event.eventName.trim().charAt(0).toUpperCase()}
+                        <div className="w-8 h-8 bg-primary/10 border border-primary/20 rounded-lg flex items-center justify-center font-bold text-primary font-mono text-[11px] shrink-0">
+                          {(isEditingDetails ? editName : event.eventName).trim().charAt(0).toUpperCase()}
                         </div>
                       )}
-                      <div className="min-w-0 select-text">
-                        <span className="text-[7.5px] uppercase tracking-widest text-primary font-bold font-mono block">
-                          Overview Profile
-                        </span>
-                        <h4 className="text-[11.5px] font-bold text-white leading-tight truncate">
-                          {event.eventName}
-                        </h4>
+                      <div className="min-w-0">
+                        <span className="text-[7.5px] uppercase tracking-widest text-primary font-bold font-mono block">Overview Profile</span>
+                        {!isEditingDetails && <h4 className="text-[11.5px] font-bold text-white leading-tight truncate">{event.eventName}</h4>}
                       </div>
                     </div>
-
-                    {event.website && (
-                      <div className="text-[9.5px] text-slate-400 truncate flex items-center gap-1.5 select-text shrink-0">
-                        <LinkIcon className="h-3 w-3 text-slate-600 shrink-0" />
-                        <a
-                          href={
-                            event.website.startsWith("http")
-                              ? event.website
-                              : `https://${event.website}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary hover:underline truncate select-text"
-                        >
-                          {event.website}
-                        </a>
+                    {!isEditingDetails ? (
+                      <button type="button" onClick={startEditing} className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white transition-all cursor-pointer shrink-0" title="Edit lead details">
+                        <Edit3 className="h-3 w-3" />
+                      </button>
+                    ) : (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button type="button" onClick={saveDetails} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[9px] font-bold cursor-pointer transition-all">
+                          <Check className="h-3 w-3" /> Save
+                        </button>
+                        <button type="button" onClick={() => setIsEditingDetails(false)} className="p-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white cursor-pointer transition-all">
+                          <X className="h-3 w-3" />
+                        </button>
                       </div>
                     )}
+                  </div>
 
-                    <div className="flex-grow flex flex-col min-h-0 select-text pt-1">
-                      <span className="font-semibold text-slate-400 block mb-1.5 text-[8.5px] uppercase tracking-wider font-mono shrink-0">
-                        Detailed Bio/Description:
-                      </span>
-                      <div className="text-[10px] text-slate-300 leading-relaxed bg-black/20 p-3 rounded-lg border border-white/5 overflow-y-auto custom-scrollbar select-text flex-grow min-h-[160px] max-h-[320px]">
-                        {event.description ||
-                          "No full description compiled for this pipeline entry yet. Use the Search or AI Assistant to fetch detailed metadata and corporate focus updates."}
+                  {isEditingDetails ? (
+                    <div className="flex flex-col gap-2 flex-1 overflow-y-auto custom-scrollbar">
+                      {[
+                        { label: 'Name', value: editName, set: setEditName, placeholder: 'Event or company name' },
+                        { label: 'Website', value: editWebsite, set: setEditWebsite, placeholder: 'https://...' },
+                        { label: event.searchType === 'vendor' ? 'Services / Focus' : 'Date', value: editDate, set: setEditDate, placeholder: event.searchType === 'vendor' ? 'e.g. Lead Retrieval, App Dev' : 'e.g. Aug 1–3, 2026' },
+                        { label: event.searchType === 'vendor' ? 'HQ Location' : 'Location', value: editLocation, set: setEditLocation, placeholder: 'City, State' },
+                      ].map(({ label, value, set, placeholder }) => (
+                        <div key={label} className="space-y-0.5">
+                          <label className="text-[8.5px] uppercase tracking-wider text-slate-500 font-bold font-mono">{label}</label>
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={e => set(e.target.value)}
+                            placeholder={placeholder}
+                            className="w-full bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white focus:outline-none focus:border-primary/50 font-sans"
+                          />
+                        </div>
+                      ))}
+                      <div className="space-y-0.5 flex-1 flex flex-col">
+                        <label className="text-[8.5px] uppercase tracking-wider text-slate-500 font-bold font-mono">Description</label>
+                        <textarea
+                          value={editDescription}
+                          onChange={e => setEditDescription(e.target.value)}
+                          placeholder="Bio / description..."
+                          className="flex-1 min-h-[100px] bg-black/40 border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white focus:outline-none focus:border-primary/50 resize-none font-sans custom-scrollbar"
+                        />
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col gap-2.5 min-h-0">
+                      {event.website && (
+                        <div className="text-[9.5px] text-slate-400 truncate flex items-center gap-1.5 shrink-0">
+                          <LinkIcon className="h-3 w-3 text-slate-600 shrink-0" />
+                          <a href={event.website.startsWith("http") ? event.website : `https://${event.website}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate">
+                            {event.website}
+                          </a>
+                        </div>
+                      )}
+                      <div className="flex-grow flex flex-col min-h-0 pt-0.5">
+                        <span className="font-semibold text-slate-400 block mb-1.5 text-[8.5px] uppercase tracking-wider font-mono shrink-0">Description:</span>
+                        <div className="text-[10px] text-slate-300 leading-relaxed bg-black/20 p-3 rounded-lg border border-white/5 overflow-y-auto custom-scrollbar flex-grow min-h-[160px] max-h-[320px]">
+                          {event.description || "No description yet. Click the edit button to add one."}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Column 2: Status Log Context - Now populating with all user notes */}
@@ -1149,88 +1286,125 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 </span>
               </button>
 
-              {/* Contacts Info Box - taking full remaining height */}
-              <div className="bg-[#040812]/50 p-3.5 rounded-xl border border-white/5 space-y-3 select-text shadow-inner flex-grow flex flex-col justify-between h-full">
-                <div className="space-y-3 select-text flex-grow flex flex-col min-h-0 h-full">
-                  <div className="flex items-center gap-1.5 pb-1.5 border-b border-white/5 shrink-0">
+              {/* Contacts Info Box */}
+              <div className="bg-[#040812]/50 p-3.5 rounded-xl border border-white/5 shadow-inner flex-grow flex flex-col h-full">
+                <div className="flex items-center justify-between pb-1.5 border-b border-white/5 shrink-0">
+                  <div className="flex items-center gap-1.5">
                     <Users className="h-3 w-3 text-primary" />
                     <label className="text-[8px] uppercase font-bold text-slate-300 tracking-widest font-mono">
-                      Channel Contacts ({(event.contacts || []).length})
+                      Contacts ({(event.contacts || []).length})
                     </label>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingContact(!isAddingContact)}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-[8px] font-bold cursor-pointer transition-all"
+                  >
+                    <Plus className="h-2.5 w-2.5" /> Add
+                  </button>
+                </div>
 
-                  {(event.contacts || []).length === 0 ? (
-                    <div className="text-[9px] text-slate-500 italic py-2 text-center select-text font-mono">
-                      No contacts specified.
+                {isAddingContact && (
+                  <div className="mt-2 mb-1 p-2.5 rounded-lg bg-white/[0.03] border border-primary/20 space-y-1.5 shrink-0">
+                    <p className="text-[8px] uppercase tracking-wider text-primary font-bold font-mono">New Contact</p>
+                    {[
+                      { placeholder: 'Name *', value: newContactName, set: setNewContactName },
+                      { placeholder: 'Role / Title', value: newContactRole, set: setNewContactRole },
+                      { placeholder: 'Email', value: newContactEmail, set: setNewContactEmail },
+                      { placeholder: 'Phone', value: newContactPhone, set: setNewContactPhone },
+                      { placeholder: 'LinkedIn URL', value: newContactSocial, set: setNewContactSocial },
+                    ].map(({ placeholder, value, set }) => (
+                      <input
+                        key={placeholder}
+                        type="text"
+                        placeholder={placeholder}
+                        value={value}
+                        onChange={e => set(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[9.5px] text-white placeholder-slate-600 focus:outline-none focus:border-primary/40 font-sans"
+                      />
+                    ))}
+                    <div className="flex gap-1.5 pt-0.5">
+                      <button type="button" onClick={handleAddContact} disabled={!newContactName.trim()} className="flex-1 py-1 bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[8.5px] font-bold rounded cursor-pointer transition-all disabled:opacity-40">Save Contact</button>
+                      <button type="button" onClick={() => setIsAddingContact(false)} className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 text-[8.5px] rounded cursor-pointer transition-all">Cancel</button>
                     </div>
-                  ) : (
-                    <div className="space-y-2 overflow-y-auto custom-scrollbar pr-0.5 select-text flex-1 max-h-[380px] scrollbar-thin">
-                      {(event.contacts || []).map((contact, cIdx) => (
-                        <div
-                          key={cIdx}
-                          className="p-2.5 rounded bg-white/[0.015] hover:bg-white/[0.035] border border-white/5 text-[10px] transition-all space-y-1.5 select-text"
-                        >
-                          <div className="flex flex-col gap-0.5 select-text">
-                            <span className="font-semibold text-slate-200 select-text text-[10.5px]">
-                              {contact.name}
-                            </span>
-                            {contact.role && (
-                              <span className="text-[7px] uppercase tracking-widest text-primary font-bold px-1.5 py-0.5 bg-primary/10 rounded border border-primary/10 self-start mt-0.5 font-mono">
-                                {contact.role}
-                              </span>
-                            )}
-                          </div>
+                  </div>
+                )}
 
-                          {/* Detailed communication coordinates */}
-                          <div className="space-y-1 text-[9px] text-slate-400 font-mono select-text mt-1.5">
-                            {contact.email && (
-                              <div className="flex items-center gap-1.5 truncate select-text">
-                                <Mail className="h-2.5 w-2.5 text-slate-600 shrink-0" />
-                                <span className="select-text text-slate-300">
-                                  {contact.email}
-                                </span>
+                {(event.contacts || []).length === 0 && !isAddingContact ? (
+                  <div className="text-[9px] text-slate-500 italic py-4 text-center font-mono flex-1">No contacts yet.</div>
+                ) : (
+                  <div className="space-y-2 overflow-y-auto custom-scrollbar pr-0.5 flex-1 mt-2 max-h-[380px]">
+                    {(event.contacts || []).map((contact, cIdx) => (
+                      <div key={cIdx} className="p-2.5 rounded bg-white/[0.015] border border-white/5 text-[10px] transition-all group/contact relative">
+                        {editingContactIdx === cIdx ? (
+                          <div className="space-y-1.5">
+                            {[
+                              { placeholder: 'Name *', value: editContactName, set: setEditContactName },
+                              { placeholder: 'Role / Title', value: editContactRole, set: setEditContactRole },
+                              { placeholder: 'Email', value: editContactEmail, set: setEditContactEmail },
+                              { placeholder: 'Phone', value: editContactPhone, set: setEditContactPhone },
+                              { placeholder: 'LinkedIn URL', value: editContactSocial, set: setEditContactSocial },
+                            ].map(({ placeholder, value, set }) => (
+                              <input
+                                key={placeholder}
+                                type="text"
+                                placeholder={placeholder}
+                                value={value}
+                                onChange={e => set(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[9.5px] text-white placeholder-slate-600 focus:outline-none focus:border-primary/40 font-sans"
+                              />
+                            ))}
+                            <div className="flex gap-1.5 pt-0.5">
+                              <button type="button" onClick={saveContactEdit} className="flex-1 py-1 bg-primary/20 hover:bg-primary/30 border border-primary/30 text-primary text-[8.5px] font-bold rounded cursor-pointer transition-all">Save</button>
+                              <button type="button" onClick={() => setEditingContactIdx(null)} className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 text-[8.5px] rounded cursor-pointer transition-all">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between gap-1">
+                              <div className="flex flex-col gap-0.5 min-w-0">
+                                <span className="font-semibold text-slate-200 text-[10.5px] truncate">{contact.name}</span>
+                                {contact.role && (
+                                  <span className="text-[7px] uppercase tracking-widest text-primary font-bold px-1.5 py-0.5 bg-primary/10 rounded border border-primary/10 self-start font-mono">{contact.role}</span>
+                                )}
                               </div>
-                            )}
-                            {contact.phone && (
-                              <div className="flex items-center gap-1.5 truncate select-text">
-                                <Phone className="h-2.5 w-2.5 text-slate-600 shrink-0" />
-                                <span className="select-text">
-                                  {contact.phone}
-                                </span>
+                              <div className="flex gap-1 opacity-0 group-hover/contact:opacity-100 transition-all shrink-0">
+                                <button type="button" onClick={() => startEditingContact(cIdx)} className="p-0.5 hover:bg-white/10 text-slate-500 hover:text-white rounded transition-all cursor-pointer" title="Edit contact">
+                                  <Edit3 className="h-2.5 w-2.5" />
+                                </button>
+                                <button type="button" onClick={() => handleDeleteContact(cIdx)} className="p-0.5 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded transition-all cursor-pointer" title="Remove contact">
+                                  <Trash2 className="h-2.5 w-2.5" />
+                                </button>
                               </div>
-                            )}
-                            {contact.social && (
-                              <div className="flex items-center gap-1.5 select-text">
-                                <a
-                                  href={
-                                    contact.social.startsWith("http")
-                                      ? contact.social
-                                      : `https://${contact.social}`
-                                  }
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1.5 text-[#0A66C2] hover:text-[#0A66C2]/80 transition-colors"
-                                  title={contact.social}
-                                >
-                                  <svg
-                                    className="h-3 w-3 shrink-0"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                  >
+                            </div>
+                            <div className="space-y-1 text-[9px] text-slate-400 font-mono mt-1.5">
+                              {contact.email && (
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <Mail className="h-2.5 w-2.5 text-slate-600 shrink-0" />
+                                  <span className="text-slate-300">{contact.email}</span>
+                                </div>
+                              )}
+                              {contact.phone && (
+                                <div className="flex items-center gap-1.5 truncate">
+                                  <Phone className="h-2.5 w-2.5 text-slate-600 shrink-0" />
+                                  <span>{contact.phone}</span>
+                                </div>
+                              )}
+                              {contact.social && (
+                                <a href={contact.social.startsWith("http") ? contact.social : `https://${contact.social}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-[#0A66C2] hover:text-[#0A66C2]/80 transition-colors">
+                                  <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="currentColor">
                                     <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
                                   </svg>
-                                  <span className="text-[9px] font-mono">
-                                    LinkedIn
-                                  </span>
+                                  <span className="text-[9px] font-mono">LinkedIn</span>
                                 </a>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
