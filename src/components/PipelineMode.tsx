@@ -436,8 +436,8 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     } else if (sortField === 'date') {
       const parseStartDate = (raw: string): number => {
         if (!raw) return 0;
-        // "October 14-17, 2026" → "October 14, 2026"
-        const compact = raw.match(/^([A-Za-z]+ \d+)-\d+,?\s*(\d{4})/);
+        // "October 14–17, 2026" or "October 14-17, 2026" → "October 14, 2026"
+        const compact = raw.match(/^([A-Za-z]+ \d+)[–—-]\d+,?\s*(\d{4})/);
         if (compact) {
           const d = new Date(`${compact[1]}, ${compact[2]}`);
           return isNaN(d.getTime()) ? 0 : d.getTime();
