@@ -125,7 +125,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
               mode === 'browse' ? "bg-primary/20 text-primary ring-1 ring-primary/50" : "text-slate-400 hover:text-white"
             )}
           >
-            vance
+            Get Leads
           </button>
           <button
             type="button"
