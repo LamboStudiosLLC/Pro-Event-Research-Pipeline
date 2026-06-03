@@ -283,10 +283,22 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const [savedEventsExpanded, setSavedEventsExpanded] = useState(true);
   const [projectName, setProjectName] = useState('');
   const [copiedContactIdx, setCopiedContactIdx] = useState<number | null>(null);
-  const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.5-flash');
   const [leftActiveTab, setLeftActiveTab] = useState<'cue' | 'scans' | 'pipeline'>('cue');
   const [scannedList, setScannedList] = useState<any[]>([]);
   const [searchType, setSearchType] = useState<'event' | 'vendor'>('event');
+  
+  // Cue Selection Scan Mode States
+  const [cueSelectModeActive, setCueSelectModeActive] = useState(false);
+  const [selectedCueItems, setSelectedCueItems] = useState<ResearchCueItem[]>([]);
+  
+  const filteredCue = researchCue.filter(cue => 
+    !cue?.eventName || !savedEvents.some(saved => saved?.eventName?.toLowerCase() === cue.eventName.toLowerCase())
+  );
+  
+  const filteredScans = scannedList.filter(scan => 
+    !scan?.eventName || !savedEvents.some(saved => saved?.eventName?.toLowerCase() === scan.eventName.toLowerCase())
+  );
   
   const [simulationMode, setSimulationMode] = useState<boolean>(() => localStorage.getItem('research_sim_mode') === 'true');
   const [spendingCapError, setSpendingCapError] = useState<string | null>(null);
@@ -310,6 +322,11 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const [isVerifyingLinkedIn, setIsVerifyingLinkedIn] = useState(false);
   const [verifyStatusMessage, setVerifyStatusMessage] = useState<string | null>(null);
 
+  const [isToolDropdownOpen, setIsToolDropdownOpen] = useState(false);
+  const [isSingleSelectionMode, setIsSingleSelectionMode] = useState(false);
+  const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
+  const [isFindingMore, setIsFindingMore] = useState(false);
+
   const handleLinkedInVerify = async () => {
     if (!result || !result.contacts || result.contacts.length === 0) {
       alert("No contacts available to verify.");
@@ -320,7 +337,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     setVerifyStatusMessage("Searching LinkedIn matches & retrieving verified contact details via LinkUp API...");
 
     try {
-      const response = await fetch('/api/linkedin-verify', {
+      const response = await fetch('/api/contacts-enrich', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -386,6 +403,201 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       setTimeout(() => setVerifyStatusMessage(null), 6000);
     } finally {
       setIsVerifyingLinkedIn(false);
+    }
+  };
+
+  const handleVerifySelected = async () => {
+    if (!result || !result.contacts || result.contacts.length === 0) {
+      alert("No contacts available to verify.");
+      return;
+    }
+    if (selectedContacts.length === 0) {
+      alert("Please select at least one contact to verify.");
+      return;
+    }
+
+    setIsVerifyingLinkedIn(true);
+    setVerifyStatusMessage(`Searching LinkedIn matches & retrieving verified contact details for ${selectedContacts.length} selected contacts...`);
+
+    const contactsToVerify = result.contacts.filter((_, idx) => selectedContacts.includes(idx));
+
+    try {
+      const response = await fetch('/api/contacts-enrich', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contacts: contactsToVerify,
+          companyName: result.eventName
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Enrichment failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && data.contacts) {
+        const enrichedSubset = data.contacts;
+        
+        let socialCount = 0;
+        let emailCount = 0;
+
+        // Map the enriched contacts back into their original positions
+        const updatedContacts = result.contacts.map((oldC, idx) => {
+          if (selectedContacts.includes(idx)) {
+            // Find the enriched contact in the returned array
+            const subsetIdx = selectedContacts.indexOf(idx);
+            const newC = enrichedSubset[subsetIdx];
+            if (newC) {
+              if (!oldC.social && newC.social) socialCount++;
+              if (!oldC.email && newC.email) emailCount++;
+              return {
+                ...oldC,
+                social: newC.social || oldC.social,
+                email: newC.email || oldC.email
+              };
+            }
+          }
+          return oldC;
+        });
+
+        const updatedResult = {
+          ...result,
+          contacts: updatedContacts
+        };
+        setResult(updatedResult);
+
+        if (multipleResults.length > 0) {
+          const updatedMultiple = multipleResults.map((item, idx) => {
+            if (idx === currentResultIndex || item.eventName === result.eventName) {
+              return { ...item, contacts: updatedContacts };
+            }
+            return item;
+          });
+          setMultipleResults(updatedMultiple);
+        }
+
+        const evId = (result as any).eventId;
+        if (evId && user && activeProjectId) {
+          try {
+            const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
+            await setDoc(eventRef, {
+              contacts: updatedContacts
+            }, { merge: true });
+          } catch (err) {
+            console.error("Failed to update contacts on saved event:", err);
+          }
+        } else {
+          // If not saved to pipeline yet, save to scans so they survive
+          await saveToScans(updatedResult);
+        }
+
+        setVerifyStatusMessage(`Verification Complete! Added ${socialCount} LinkedIn handles and ${emailCount} verified emails.`);
+        setTimeout(() => setVerifyStatusMessage(null), 6000);
+      }
+    } catch (err: any) {
+      console.error("LinkedIn Verification error:", err);
+      setVerifyStatusMessage(`Verification error: ${err.message || 'An error occurred during query'}`);
+      setTimeout(() => setVerifyStatusMessage(null), 6000);
+    } finally {
+      setIsVerifyingLinkedIn(false);
+      setIsSingleSelectionMode(false);
+      setSelectedContacts([]);
+    }
+  };
+
+  const handleFindMoreContacts = async () => {
+    if (!result) return;
+
+    setIsFindingMore(true);
+    setVerifyStatusMessage("Searching LinkedIn & social indexes for additional key contacts...");
+
+    const existingNames = (result.contacts || []).map(c => c.name).filter(Boolean);
+
+    try {
+      const response = await fetch('/api/find-more-contacts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyName: result.eventName,
+          existingNames,
+          searchType: result.searchType || 'event'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to find more contacts: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && data.contacts && Array.isArray(data.contacts)) {
+        const newContacts = data.contacts;
+
+        if (newContacts.length === 0) {
+          setVerifyStatusMessage("No additional contacts found.");
+          setTimeout(() => setVerifyStatusMessage(null), 4000);
+          return;
+        }
+
+        // Filter duplicates again on client side to be 100% safe
+        const uniqueNewContacts = newContacts.filter(nc => 
+          nc.name && !existingNames.some(existing => existing.toLowerCase() === nc.name.toLowerCase())
+        ).map(nc => ({
+          ...nc,
+          contactInfo: [nc.email, nc.phone, nc.social].filter(Boolean).join(' | ')
+        }));
+
+        if (uniqueNewContacts.length === 0) {
+          setVerifyStatusMessage("No new additional contacts found.");
+          setTimeout(() => setVerifyStatusMessage(null), 4000);
+          return;
+        }
+
+        const updatedContacts = [...(result.contacts || []), ...uniqueNewContacts];
+        const updatedResult = {
+          ...result,
+          contacts: updatedContacts
+        };
+        setResult(updatedResult);
+
+        if (multipleResults.length > 0) {
+          const updatedMultiple = multipleResults.map((item, idx) => {
+            if (idx === currentResultIndex || item.eventName === result.eventName) {
+              return { ...item, contacts: updatedContacts };
+            }
+            return item;
+          });
+          setMultipleResults(updatedMultiple);
+        }
+
+        const evId = (result as any).eventId;
+        if (evId && user && activeProjectId) {
+          try {
+            const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
+            await setDoc(eventRef, {
+              contacts: updatedContacts
+            }, { merge: true });
+          } catch (err) {
+            console.error("Failed to update contacts on saved event:", err);
+          }
+        } else {
+          // If not saved to pipeline yet, save to scans so they survive
+          await saveToScans(updatedResult);
+        }
+
+        setVerifyStatusMessage(`Success! Discovered and added ${uniqueNewContacts.length} new contact(s) to the sheet.`);
+        setTimeout(() => setVerifyStatusMessage(null), 6000);
+      }
+    } catch (err: any) {
+      console.error("Find More Contacts error:", err);
+      setVerifyStatusMessage(`Error finding contacts: ${err.message || 'An error occurred'}`);
+      setTimeout(() => setVerifyStatusMessage(null), 6000);
+    } finally {
+      setIsFindingMore(false);
     }
   };
 
@@ -1011,6 +1223,111 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
+  const handleToggleCueSelection = (item: ResearchCueItem) => {
+    setSelectedCueItems(prev => {
+      const exists = prev.some(c => c.cueId === item.cueId);
+      if (exists) {
+        return prev.filter(c => c.cueId !== item.cueId);
+      } else {
+        return [...prev, item];
+      }
+    });
+  };
+
+  const handleRunCueSelectionScans = async () => {
+    if (selectedCueItems.length === 0) return;
+
+    setLoading(true);
+    setResult(null);
+    setMultipleResults([]);
+    setCurrentResultIndex(0);
+    setIsSaved(false);
+
+    const itemsToScan = [...selectedCueItems];
+    setCueSelectModeActive(false);
+    setSelectedCueItems([]);
+
+    const fetchedResults: ResearchResult[] = [];
+
+    for (let i = 0; i < itemsToScan.length; i++) {
+      const item = itemsToScan[i];
+      const name = item.eventName;
+      const searchType = item.searchType || 'event';
+      setCurrentScanningEvent(name);
+
+      if (simulationMode) {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          const data = getSimulatedResult(name, searchType);
+          fetchedResults.push(data);
+          await saveToScans(data);
+          await syncScanToPipeline(data);
+          await syncClaimedLeadMetadata(name, data);
+          setSpendingCapError(null);
+          if (item.cueId && user && activeProjectId) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+          }
+        } catch (err) {
+          console.error(err);
+        }
+        continue;
+      }
+
+      try {
+        const response = await fetch('/api/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            eventName: name, 
+            filters, 
+            model: 'gemini-3.5-flash', 
+            searchType 
+          })
+        });
+        const data = await response.json();
+        if (data && !data.error) {
+          fetchedResults.push(data);
+          await saveToScans(data);
+          await syncScanToPipeline(data);
+          await syncClaimedLeadMetadata(name, data);
+          setSpendingCapError(null);
+          if (item.cueId && user && activeProjectId) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+          }
+        } else {
+          console.error(`Error researching "${name}":`, data?.details || data?.error);
+          const errStr = String(data?.error + " " + data?.details).toLowerCase();
+          if (
+            data?.code === 'SPENDING_CAP_EXCEEDED' || 
+            data?.code === 'QUOTA_EXCEEDED' || 
+            errStr.includes("spending cap") || 
+            errStr.includes("spend cap") || 
+            errStr.includes("quota") || 
+            errStr.includes("429") || 
+            errStr.includes("resource_exhausted") || 
+            response.status === 429
+          ) {
+            setSpendingCapError(data.error || "Many requests failed due to a billing cap on AI Studio.");
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to research "${name}":`, err);
+      }
+    }
+
+    setLoading(false);
+    setCurrentScanningEvent('');
+
+    if (fetchedResults.length > 0) {
+      setMultipleResults(fetchedResults);
+      setCurrentResultIndex(0);
+      setResult(fetchedResults[0]);
+      setQueryText(fetchedResults[0].eventName);
+    } else {
+      alert("All selected cue scans failed. If your API key triggered a spending limit error on Google AI Studio, please turn on Simulation Mode to try out the app's rich pipeline features.");
+    }
+  };
+
   const handleSave = async () => {
     if (!user || !result) return;
 
@@ -1200,7 +1517,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   };
 
   const downloadCueCSV = () => {
-    if (researchCue.length === 0) {
+    if (filteredCue.length === 0) {
       alert("No events/vendors in your research cue to export.");
       return;
     }
@@ -1220,7 +1537,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       "Focus / Services Offered"
     ];
 
-    const rows = researchCue.map(item => [
+    const rows = filteredCue.map(item => [
       escapeCSV(`${user?.displayName || "Anonymous"} <${user?.email || "No Email"}>`),
       escapeCSV(projectName || "Active Project"),
       escapeCSV(new Date().toUTCString()),
@@ -1462,6 +1779,11 @@ Pro Event Research Team`;
       return;
     }
 
+    if (!user || !activeProjectId) {
+      alert("No active project or user context found.");
+      return;
+    }
+
     setLoading(true);
     setResult(null);
     setMultipleResults([]);
@@ -1469,19 +1791,54 @@ Pro Event Research Team`;
     setIsSaved(false);
     setIsMultipleModalOpen(false);
 
+    // 1. Add all items to the Cue in Firestore
+    const addedCueItems: ResearchCueItem[] = [];
+    try {
+      for (const name of eventNames) {
+        const docRef = await addDoc(collection(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue'), {
+          eventName: name,
+          searchType: searchType,
+          isSandbox: simulationMode,
+          createdAt: serverTimestamp()
+        });
+        addedCueItems.push({
+          cueId: docRef.id,
+          eventName: name,
+          website: '',
+          servicesOffered: '',
+          searchType: searchType,
+          isSandbox: simulationMode,
+          createdAt: null
+        });
+      }
+    } catch (err) {
+      console.error("Failed to add items to cue:", err);
+      alert("Failed to initialize some items into the Scan Cue.");
+      setLoading(false);
+      return;
+    }
+
     const fetchedResults: ResearchResult[] = [];
 
-    for (let i = 0; i < eventNames.length; i++) {
-      const name = eventNames[i];
+    // 2. Scan sequentially
+    for (let i = 0; i < addedCueItems.length; i++) {
+      const item = addedCueItems[i];
+      const name = item.eventName;
+      const currentSearchType = item.searchType || 'event';
       setCurrentScanningEvent(name);
 
       if (simulationMode) {
         try {
-          await new Promise(resolve => setTimeout(resolve, 600));
-          const data = getSimulatedResult(name, searchType);
+          await new Promise(resolve => setTimeout(resolve, 800));
+          const data = getSimulatedResult(name, currentSearchType);
           fetchedResults.push(data);
           await saveToScans(data);
+          await syncScanToPipeline(data);
+          await syncClaimedLeadMetadata(name, data);
           setSpendingCapError(null);
+          if (item.cueId && user && activeProjectId) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+          }
         } catch (err) {
           console.error(err);
         }
@@ -1492,12 +1849,23 @@ Pro Event Research Team`;
         const response = await fetch('/api/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventName: name, filters, model: selectedModel, searchType })
+          body: JSON.stringify({ 
+            eventName: name, 
+            filters, 
+            model: 'gemini-3.5-flash', 
+            searchType: currentSearchType 
+          })
         });
         const data = await response.json();
         if (data && !data.error) {
           fetchedResults.push(data);
           await saveToScans(data);
+          await syncScanToPipeline(data);
+          await syncClaimedLeadMetadata(name, data);
+          setSpendingCapError(null);
+          if (item.cueId && user && activeProjectId) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', item.cueId));
+          }
         } else {
           console.error(`Error researching "${name}":`, data?.details || data?.error);
           const errStr = String(data?.error + " " + data?.details).toLowerCase();
@@ -1528,7 +1896,7 @@ Pro Event Research Team`;
       setResult(fetchedResults[0]);
       setQueryText(fetchedResults[0].eventName);
     } else {
-      alert("All cued event scans failed. If your API key triggered a spending limit error on Google AI Studio, please turn on Simulation Mode to try out the app's rich pipeline features.");
+      alert("All selected multi-scan events failed. If your API key triggered a spending limit error on Google AI Studio, please turn on Simulation Mode to try out the app's rich pipeline features.");
     }
   };
 
@@ -1562,7 +1930,7 @@ Pro Event Research Team`;
                   ? "bg-black/60 text-primary border-black/45 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.8)]"
                   : "bg-zinc-950/80 text-zinc-500 border-white/5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]"
               )}>
-                {researchCue.length}
+                {filteredCue.length}
               </span>
             </button>
             <button
@@ -1582,7 +1950,7 @@ Pro Event Research Team`;
                   ? "bg-black/60 text-primary border-black/45 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.8)]"
                   : "bg-zinc-950/80 text-zinc-500 border-white/5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]"
               )}>
-                {scannedList.length}
+                {filteredScans.length}
               </span>
             </button>
             <button
@@ -1610,86 +1978,140 @@ Pro Event Research Team`;
           {/* Active Tab Content */}
           <div className="flex-1 flex flex-col min-h-0">
             {leftActiveTab === 'cue' && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1">
-                {researchCue.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
-                    <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No items cued</span>
+              <div className="flex-1 flex flex-col min-h-0">
+                {cueSelectModeActive && (
+                  <div className="shrink-0 p-3 mb-2 bg-primary/10 border border-primary/20 rounded-xl flex flex-col gap-2 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
+                        {selectedCueItems.length} selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCueSelectModeActive(false);
+                          setSelectedCueItems([]);
+                        }}
+                        className="text-[9px] text-slate-400 hover:text-white transition-all underline cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={selectedCueItems.length === 0 || loading}
+                      onClick={handleRunCueSelectionScans}
+                      className="w-full py-2 px-3 bg-primary hover:bg-secondary text-slate-900 font-bold rounded-lg text-xs transition-all active:scale-[0.98] disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                    >
+                      <Zap className="h-3.5 w-3.5 fill-slate-900" />
+                      Run {selectedCueItems.length} Scan{selectedCueItems.length !== 1 ? 's' : ''}
+                    </button>
                   </div>
-                ) : (
-                  researchCue.map((ev) => {
-                    const isSelected = queryText.toLowerCase() === ev.eventName.toLowerCase();
-                    return (
-                      <div key={ev.cueId} className="relative group select-text">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQueryText(ev.eventName);
-                            setSearchType(ev.searchType || 'event');
-                            // Load from scanned list or saved events if available
-                            const scanned = scannedList.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
-                            const saved = savedEvents.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
-                            if (scanned) {
-                              setResult(scanned);
-                            } else if (saved) {
-                              setResult(saved);
-                            } else {
-                              // Stub so the panel renders without needing a scan
-                              setResult({
-                                eventName: ev.eventName,
-                                website: ev.website || '',
-                                date: '',
-                                location: '',
-                                description: '',
-                                contacts: [],
-                                searchType: ev.searchType || 'event',
-                                isSandbox: ev.isSandbox || false,
-                              });
-                            }
-                          }}
-                          className={cn(
-                            "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
-                            isSelected 
-                              ? "bg-primary/15 border-primary/40 text-white font-medium" 
-                              : "bg-white/[0.01] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
-                          )}
-                        >
-                          <span className="truncate w-full block font-semibold select-text">{ev.eventName}</span>
-                        </button>
-                        
-                        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
-                          <button
-                            type="button"
-                            onClick={() => handleTriggerCueSearch(ev)}
-                            className="p-1.5 bg-primary/10 hover:bg-primary/25 text-primary rounded border border-primary/20 cursor-pointer"
-                            title="Run deep research"
-                          >
-                            <Search className="h-3 w-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteCueItem(ev.cueId, ev.eventName, e)}
-                            className="p-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
-                            title="Remove from cue"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
                 )}
+
+                <div className={cn(
+                  "flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1 rounded-xl p-1 transition-all duration-300",
+                  cueSelectModeActive ? "border-2 border-primary/30 bg-[#0c0d12]/50 shadow-[0_0_15px_rgba(var(--primary-rgb),0.1)]" : ""
+                )}>
+                  {filteredCue.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
+                      <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No items cued</span>
+                    </div>
+                  ) : (
+                    filteredCue.map((ev) => {
+                      const isSelected = queryText.toLowerCase() === ev.eventName.toLowerCase();
+                      const isCueItemSelected = selectedCueItems.some(c => c.cueId === ev.cueId);
+                      const selectionIndex = selectedCueItems.findIndex(c => c.cueId === ev.cueId);
+                      return (
+                        <div key={ev.cueId} className="relative group select-text">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (cueSelectModeActive) {
+                                handleToggleCueSelection(ev);
+                              } else {
+                                setQueryText(ev.eventName);
+                                setSearchType(ev.searchType || 'event');
+                                // Load from scanned list or saved events if available
+                                const scanned = scannedList.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                                const saved = savedEvents.find(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
+                                if (scanned) {
+                                  setResult(scanned);
+                                } else if (saved) {
+                                  setResult(saved);
+                                } else {
+                                  // Stub so the panel renders without needing a scan
+                                  setResult({
+                                    eventName: ev.eventName,
+                                    website: ev.website || '',
+                                    date: '',
+                                    location: '',
+                                    description: '',
+                                    contacts: [],
+                                    searchType: ev.searchType || 'event',
+                                    isSandbox: ev.isSandbox || false,
+                                  });
+                                }
+                              }
+                            }}
+                            className={cn(
+                              "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex items-center gap-2 border cursor-pointer select-text",
+                              cueSelectModeActive && isCueItemSelected
+                                ? "bg-primary/20 border-primary text-white font-medium"
+                                : !cueSelectModeActive && isSelected 
+                                ? "bg-primary/15 border-primary/40 text-white font-medium" 
+                                : "bg-white/[0.01] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
+                            )}
+                          >
+                            {cueSelectModeActive && (
+                              <div className={cn(
+                                "w-4.5 h-4.5 rounded-full border flex items-center justify-center shrink-0 transition-all text-[9.5px] font-black",
+                                isCueItemSelected
+                                  ? "border-primary bg-primary text-slate-900"
+                                  : "border-slate-500 hover:border-slate-400 text-transparent"
+                              )}>
+                                {isCueItemSelected ? (selectionIndex + 1) : null}
+                              </div>
+                            )}
+                            <span className="truncate w-full block font-semibold select-text">{ev.eventName}</span>
+                          </button>
+                          
+                          {!cueSelectModeActive && (
+                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
+                              <button
+                                type="button"
+                                onClick={() => handleTriggerCueSearch(ev)}
+                                className="p-1.5 bg-primary/10 hover:bg-primary/25 text-primary rounded border border-primary/20 cursor-pointer"
+                                title="Run deep research"
+                              >
+                                <Search className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteCueItem(ev.cueId, ev.eventName, e)}
+                                className="p-1.5 bg-red-500/10 hover:bg-red-500/25 text-red-500 rounded border border-red-500/20 cursor-pointer"
+                                title="Remove from cue"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
 
             {leftActiveTab === 'scans' && (
               <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1">
-                {scannedList.length === 0 ? (
+                {filteredScans.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
                     <Search className="h-5 w-5 text-slate-700 mb-1.5" />
                     <span className="text-[9px] text-slate-600 font-bold uppercase tracking-wider">No scans finished yet</span>
                   </div>
                 ) : (
-                  scannedList.map((ev) => {
+                  filteredScans.map((ev) => {
                     const isSelected = result && (result.eventName.toLowerCase() === ev.eventName.toLowerCase());
                     const isInPipeline = savedEvents.some(s => s.eventName.toLowerCase() === ev.eventName.toLowerCase());
                     return (
@@ -1929,23 +2351,7 @@ Pro Event Research Team`;
             </div>
           </div>
 
-          {/* AI Model Selection Dropdown */}
-          <div className="relative flex shrink-0 w-[140px]">
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              disabled={loading}
-              className="w-full h-12 bg-[#0c0d12]/90 border border-white/10 rounded-xl px-3 pr-8 text-xs text-primary font-bold focus:ring-1 focus:ring-primary outline-none cursor-pointer appearance-none transition-colors hover:border-white/20"
-            >
-              <option value="gemini-3.5-flash" className="bg-[#030712] text-slate-300 font-bold">
-                ⚡ Gemini 3.5
-              </option>
-              <option value="gemini-3.1-flash-lite" className="bg-[#030712] text-slate-300">
-                🌱 Gemini 3.1 Lite
-              </option>
-            </select>
-            <ChevronDown className="h-3.5 w-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-          </div>
+
 
           <div className="relative flex shrink-0">
             <button 
@@ -1995,6 +2401,19 @@ Pro Event Research Team`;
                   >
                     <Layers className="h-4 w-4 text-primary" />
                     Multiple Events Scan...
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      setLeftActiveTab('cue');
+                      setCueSelectModeActive(true);
+                      setSelectedCueItems([]);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs rounded-lg text-slate-300 hover:bg-white/5 transition-all flex items-center gap-2 cursor-pointer font-bold border-t border-white/5 pt-2 mt-1"
+                  >
+                    <CheckCircle className="h-4 w-4 text-primary" />
+                    Select From Cue
                   </button>
                 </div>
               </>
@@ -2250,25 +2669,94 @@ Pro Event Research Team`;
               {/* Verified Contact Sheet Header */}
               <div className="border-t border-white/5 pt-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3.5">
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3 relative select-none">
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-primary" />
                       <h4 className="text-xs font-bold text-white uppercase tracking-widest">Contacts</h4>
                     </div>
-                    
-                    <button
-                      onClick={handleLinkedInVerify}
-                      disabled={isVerifyingLinkedIn || !result || !result.contacts || result.contacts.length === 0}
-                      className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 ${
-                        isVerifyingLinkedIn
-                          ? 'bg-slate-800 text-slate-400 cursor-not-allowed border-white/10'
-                          : 'bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98]'
-                      }`}
-                    >
-                      <Zap className={`h-3 w-3 shrink-0 ${isVerifyingLinkedIn ? 'animate-bounce text-slate-400' : 'text-primary animate-pulse'}`} />
-                      {isVerifyingLinkedIn ? 'Enriching Data...' : 'LinkedIn Verify/Add Contacts'}
-                    </button>
-<span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes, but often identifies more contact emails. Uses AI Credits.</span>
+
+                    {isSingleSelectionMode ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleVerifySelected}
+                          disabled={isVerifyingLinkedIn || selectedContacts.length === 0}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20",
+                            selectedContacts.length === 0 || isVerifyingLinkedIn
+                              ? "bg-slate-800 text-slate-400 cursor-not-allowed border-white/10"
+                              : "bg-primary/20 hover:bg-primary/30 hover:border-primary/55 text-primary active:scale-[0.98] cursor-pointer"
+                          )}
+                        >
+                          <Zap className="h-3 w-3 shrink-0 text-primary animate-pulse" />
+                          <span>Verify Selected ({selectedContacts.length})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsSingleSelectionMode(false);
+                            setSelectedContacts([]);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase bg-zinc-800 hover:bg-zinc-700 text-slate-300 border border-white/10 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative inline-block">
+                        <button
+                          type="button"
+                          onClick={() => setIsToolDropdownOpen(!isToolDropdownOpen)}
+                          disabled={isVerifyingLinkedIn || isFindingMore || !result || !result.contacts || result.contacts.length === 0}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98] cursor-pointer"
+                        >
+                          <Zap className="h-3 w-3 shrink-0 text-primary animate-pulse" />
+                          <span>LinkedIn Tool</span>
+                          <ChevronDown className="h-3 w-3 text-primary shrink-0 transition-transform duration-200" style={{ transform: isToolDropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
+                        </button>
+
+                        {isToolDropdownOpen && (
+                          <>
+                            {/* Backdrop to close dropdown on click outside */}
+                            <div className="fixed inset-0 z-30" onClick={() => setIsToolDropdownOpen(false)} />
+                            <div className="absolute left-0 mt-1.5 w-44 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-1 z-40 flex flex-col gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsSingleSelectionMode(true);
+                                  setSelectedContacts([]);
+                                  setIsToolDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                              >
+                                Single Contacts
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsToolDropdownOpen(false);
+                                  handleLinkedInVerify();
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                              >
+                                All Contacts
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsToolDropdownOpen(false);
+                                  handleFindMoreContacts();
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                              >
+                                Find More Contacts
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes. Uses AI Credits.</span>
                   </div>
                 </div>
 
@@ -2276,7 +2764,7 @@ Pro Event Research Team`;
                   <div className="mb-3.5 p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-slate-200 transition-all duration-300">
                     <div className="flex items-center gap-2.5">
                       <span className="relative flex h-2 w-2 shrink-0">
-                        {isVerifyingLinkedIn ? (
+                        {isVerifyingLinkedIn || isFindingMore ? (
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                         ) : null}
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-primary animate-pulse"></span>
@@ -2287,11 +2775,17 @@ Pro Event Research Team`;
                 )}
 
                 {/* Contacts Sheet structured columns */}
-                <div className="border border-white/5 rounded-xl overflow-hidden bg-[#0c0d12]">
+                <div className={cn(
+                  "border rounded-xl overflow-hidden bg-[#0c0d12] transition-all duration-300",
+                  isSingleSelectionMode 
+                    ? "border-primary/55 ring-2 ring-primary/40 shadow-[0_0_20px_rgba(244,63,94,0.08)] scale-[1.002]" 
+                    : "border-white/5"
+                )}>
                   <table className="w-full text-left border-collapse table-fixed">
                     <thead>
                       <tr className="bg-white/[0.02] border-b border-white/10 text-[9px] text-slate-500 uppercase tracking-widest font-extrabold">
-                        <th className="p-3 pl-4 w-[18%]">Role / Title</th>
+                        {isSingleSelectionMode && <th className="p-3 pl-4 w-[6%] text-center">Select</th>}
+                        <th className={cn("p-3 w-[18%]", isSingleSelectionMode ? "pl-2" : "pl-4")}>Role / Title</th>
                         <th className="p-3 w-[20%]">Contact Name</th>
                         <th className="p-3 w-[24%]">Email</th>
                         <th className="p-3 w-[18%]">Phone</th>
@@ -2309,6 +2803,30 @@ Pro Event Research Team`;
 
                         return (
                           <tr key={idx} className="hover:bg-white/[0.01] transition-colors group">
+                            {isSingleSelectionMode && (
+                              <td className="p-3 text-center border-r border-white/5">
+                                <div className="flex items-center justify-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (selectedContacts.includes(idx)) {
+                                        setSelectedContacts(selectedContacts.filter(i => i !== idx));
+                                      } else {
+                                        setSelectedContacts([...selectedContacts, idx]);
+                                      }
+                                    }}
+                                    className={cn(
+                                      "h-4 w-4 rounded-full border flex items-center justify-center transition-all cursor-pointer",
+                                      selectedContacts.includes(idx)
+                                        ? "bg-primary border-primary text-black"
+                                        : "border-white/20 hover:border-white/40 bg-transparent text-transparent"
+                                    )}
+                                  >
+                                    <Check className="h-2.5 w-2.5 stroke-[3]" />
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                             
                             {/* ROLE / TITLE */}
                             <td 
@@ -2332,7 +2850,7 @@ Pro Event Research Team`;
                                   className="w-full bg-zinc-900 border border-primary/50 rounded px-1.5 py-1 text-[11px] text-white focus:outline-none"
                                 />
                               ) : (
-                                <div className="truncate cursor-text text-slate-300 select-text" title="Double click to edit">
+                                <div className="whitespace-normal break-words cursor-text text-slate-300 select-text" title="Double click to edit">
                                   {contact.role || <span className="text-slate-600 italic">No Title</span>}
                                 </div>
                               )}
@@ -2486,22 +3004,50 @@ Pro Event Research Team`;
                                   className="w-full bg-zinc-900 border border-primary/50 rounded px-1.5 py-1 text-[11px] font-mono text-white focus:outline-none"
                                 />
                               ) : (
-                                <div className="truncate cursor-text" title="Double click to edit">
+                                <div className="flex items-center gap-1 cursor-text select-text" title="Double click cell or click edit icon to edit">
                                   {contact.social ? (
-                                    <a 
-                                      href={contact.social.startsWith('http') ? contact.social : `https://${contact.social}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="hover:underline flex items-center gap-1 inline-flex text-primary font-sans font-medium text-[11px]"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <Linkedin className="h-2.5 w-2.5 shrink-0" />
-                                      {contact.social.includes('linkedin.com/in/') 
-                                        ? contact.social.split('linkedin.com/in/')[1]?.replace(/\/$/, '') || 'LinkedIn'
-                                        : 'Profile'}
-                                    </a>
+                                    <>
+                                      <a 
+                                        href={contact.social.startsWith('http') ? contact.social : `https://${contact.social}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="hover:underline flex items-center gap-1 inline-flex text-primary font-sans font-medium text-[11px] truncate max-w-[80%]"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <Linkedin className="h-2.5 w-2.5 shrink-0" />
+                                        {contact.social.includes('linkedin.com/in/') 
+                                          ? contact.social.split('linkedin.com/in/')[1]?.replace(/\/$/, '') || 'LinkedIn'
+                                          : 'Profile'}
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingCell({ contactIdx: idx, fieldName: 'social' });
+                                          setEditingValue(contact.social || '');
+                                        }}
+                                        className="p-1 hover:bg-white/10 text-slate-500 hover:text-white rounded transition-all cursor-pointer shrink-0 ml-auto"
+                                        title="Edit social handle"
+                                      >
+                                        <Edit3 className="h-2.5 w-2.5" />
+                                      </button>
+                                    </>
                                   ) : (
-                                    <span className="text-slate-700 font-sans italic">-</span>
+                                    <>
+                                      <span className="text-slate-700 font-sans italic">-</span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setEditingCell({ contactIdx: idx, fieldName: 'social' });
+                                          setEditingValue('');
+                                        }}
+                                        className="p-1 hover:bg-white/10 text-slate-500 hover:text-white rounded transition-all cursor-pointer shrink-0 ml-auto opacity-0 group-hover:opacity-100"
+                                        title="Add social handle"
+                                      >
+                                        <Edit3 className="h-2.5 w-2.5" />
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               )}
@@ -2831,7 +3377,7 @@ Pro Event Research Team`;
             <div className="flex items-center justify-between pb-4 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <Layers className="h-5 w-5 text-primary" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Submit Multiple Event Scans</h3>
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Submit Multiple Event Names to Scan</h3>
               </div>
               <button 
                 type="button"
@@ -2879,7 +3425,7 @@ Pro Event Research Team`;
                   className="flex items-center gap-1 text-[11px] text-primary hover:underline font-bold cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  Add Event to Cue
+                  Add Entry
                 </button>
                 <span className="text-white/20 text-xs">|</span>
                 <label className="flex items-center gap-1 text-[11px] text-primary hover:underline font-bold cursor-pointer select-none">
@@ -2906,7 +3452,7 @@ Pro Event Research Team`;
                   type="submit"
                   className="px-5 py-2 bg-primary hover:bg-secondary text-slate-900 rounded-xl text-xs font-bold shadow-lg shadow-primary/15 hover:shadow-primary/25 cursor-pointer"
                 >
-                  Scan Multiple Events ({multipleScanInputs.filter(Boolean).length})
+                  Scan Multi Events ({multipleScanInputs.filter(Boolean).length})
                 </button>
               </div>
             </form>

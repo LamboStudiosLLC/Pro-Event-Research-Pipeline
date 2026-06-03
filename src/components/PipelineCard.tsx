@@ -726,7 +726,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 8 }}
       className={cn(
-        "w-full border-[3px] rounded-xl transition-all duration-500 shadow-md select-text p-3 flex flex-col relative overflow-hidden",
+        "w-full border-2 rounded-xl transition-all duration-500 shadow-md select-text p-3 flex flex-col relative overflow-hidden",
         getContainerClasses(),
       )}
     >
@@ -736,7 +736,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         onClick={() => setSelectedEventId(isExpanded ? null : event.eventId)}
       >
         {/* Name Column */}
-        <div className="col-span-12 md:col-span-4 min-w-0 flex items-center gap-2">
+        <div className="col-span-12 md:col-span-3 min-w-0 flex items-center gap-2">
           {isExpanded ? (
             <ChevronDown className="h-4 w-4 text-primary shrink-0 transition-transform duration-250 rotate-180" />
           ) : (
@@ -756,7 +756,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         </div>
 
         {/* Type Column */}
-        <div className="col-span-2 md:col-span-1 flex items-center">
+        <div className="col-span-3 md:col-span-1 flex items-center">
           {event.searchType === "vendor" ? (
             <span className="px-1 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 whitespace-nowrap">
               VENDOR
@@ -768,24 +768,24 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           )}
         </div>
 
-        {/* Date & Location Column */}
-        <div className="col-span-10 md:col-span-3 min-w-0 space-y-0.5">
-          <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
-            {event.searchType === "vendor" ? (
-              <Briefcase className="h-3 w-3 text-primary/60 shrink-0" />
-            ) : (
-              <Calendar className="h-3 w-3 text-primary/60 shrink-0" />
-            )}
-            <span className="truncate">{formatDate(event.date) || event.date}</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
-            <MapPin className="h-3 w-3 text-primary/60 shrink-0" />
-            <span className="truncate">
-              {event.searchType === "vendor"
-                ? `HQ: ${event.location}`
-                : event.location}
-            </span>
-          </div>
+        {/* Date Column */}
+        <div className="col-span-9 md:col-span-2 min-w-0 flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
+          {event.searchType === "vendor" ? (
+            <Briefcase className="h-3 w-3 text-primary/60 shrink-0" />
+          ) : (
+            <Calendar className="h-3 w-3 text-primary/60 shrink-0" />
+          )}
+          <span className="truncate">{formatDate(event.date) || event.date || "n/a"}</span>
+        </div>
+
+        {/* Location Column */}
+        <div className="col-span-12 md:col-span-2 min-w-0 flex items-center gap-1.5 text-[9.5px] text-slate-400 truncate">
+          <MapPin className="h-3 w-3 text-primary/60 shrink-0" />
+          <span className="truncate">
+            {event.searchType === "vendor" && event.location && !event.location.startsWith("HQ:")
+              ? `HQ: ${event.location}`
+              : event.location || "n/a"}
+          </span>
         </div>
 
         {/* Status Dropdown Column */}

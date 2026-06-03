@@ -49,9 +49,18 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
 
-  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt'>('date');
+  const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt' | 'searchType' | 'location'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [statusFilter, setStatusFilter] = useState<string>('Initial');
+
+  const handleHeaderClick = (field: typeof sortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
 
   const expandedEvent = events.find(e => e.eventId === selectedEventId);
   const expandedStageId = expandedEvent ? expandedEvent.status : null;
@@ -470,6 +479,12 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     } else if (sortField === 'createdAt') {
       valA = (a as any).createdAt?.seconds || 0;
       valB = (b as any).createdAt?.seconds || 0;
+    } else if (sortField === 'searchType') {
+      valA = a.searchType || '';
+      valB = b.searchType || '';
+    } else if (sortField === 'location') {
+      valA = a.location || '';
+      valB = b.location || '';
     }
 
     if (typeof valA === 'string') {
@@ -562,8 +577,10 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
               >
                 <option value="createdAt" className="bg-[#030712]">Date Scanned</option>
                 <option value="eventName" className="bg-[#030712]">Name (A-Z)</option>
-                <option value="status" className="bg-[#030712]">Pipeline Status</option>
+                <option value="searchType" className="bg-[#030712]">Type</option>
                 <option value="date" className="bg-[#030712]">Event Date</option>
+                <option value="location" className="bg-[#030712]">Location</option>
+                <option value="status" className="bg-[#030712]">Pipeline Status</option>
               </select>
             </div>
 
@@ -578,16 +595,62 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
                 <ArrowDown className="h-3.5 w-3.5" />
               )}
             </button>
+
+            {/* Share All Button */}
+            <button
+              type="button"
+              onClick={downloadPipelineCSV}
+              className="flex items-center justify-center p-1.5 bg-primary hover:bg-secondary text-slate-900 border border-transparent rounded-lg transition-all cursor-pointer shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98]"
+              title="Share All (Export full pipeline to CSV)"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </div>
 
       {/* Table Header Row */}
       <div className="hidden md:grid grid-cols-12 gap-3 items-center w-full px-5 py-2.5 bg-zinc-950/40 border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 tracking-wider uppercase font-mono mt-1 shrink-0">
-        <span className="col-span-4">Event / Vendor Name</span>
-        <span className="col-span-1">Type</span>
-        <span className="col-span-3">Date / Location</span>
-        <span className="col-span-3 text-right">Pipeline Status</span>
+        <button
+          type="button"
+          onClick={() => handleHeaderClick('eventName')}
+          className="col-span-3 flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-left font-bold font-mono outline-none"
+        >
+          Event / Vendor Name
+          {sortField === 'eventName' && (sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-primary shrink-0" />)}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleHeaderClick('searchType')}
+          className="col-span-1 flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-left font-bold font-mono outline-none"
+        >
+          Type
+          {sortField === 'searchType' && (sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-primary shrink-0" />)}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleHeaderClick('date')}
+          className="col-span-2 flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-left font-bold font-mono outline-none"
+        >
+          Date
+          {sortField === 'date' && (sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-primary shrink-0" />)}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleHeaderClick('location')}
+          className="col-span-2 flex items-center gap-1 hover:text-white transition-colors cursor-pointer text-left font-bold font-mono outline-none"
+        >
+          Location
+          {sortField === 'location' && (sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-primary shrink-0" />)}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleHeaderClick('status')}
+          className="col-span-3 flex items-center justify-end gap-1 hover:text-white transition-colors cursor-pointer text-right font-bold font-mono outline-none w-full"
+        >
+          Pipeline Status
+          {sortField === 'status' && (sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-primary shrink-0" />)}
+        </button>
         <span className="col-span-1 text-right">Actions</span>
       </div>
 

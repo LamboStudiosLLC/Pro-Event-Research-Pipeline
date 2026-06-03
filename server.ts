@@ -83,7 +83,7 @@ app.post("/api/browse", async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.1-flash-lite",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -408,142 +408,259 @@ Return exactly 20 distinct variations inside a JSON array under the key "variati
 });
 
 // Linkup LinkedIn Verification & Contact Enrichment
-app.post("/api/linkedin-verify", async (req, res) => {
+app.post("/api/contacts-enrich", async (req, res) => {
   const { contacts, companyName } = req.body;
   if (!contacts || !Array.isArray(contacts)) {
     return res.status(400).json({ error: "Contacts array is required" });
   }
 
   const apiKey = process.env.LINKUP_API_KEY;
-  const updatedContacts = [];
-
-  console.log(`LinkedIn Verification request for ${contacts.length} contacts at ${companyName || 'Unknown company'}`);
-
-  for (const contact of contacts) {
-    if (!contact.name) {
-      updatedContacts.push(contact);
-      continue;
-    }
-
-    try {
-      const parts = contact.name.trim().split(/\s+/);
-      const firstName = parts[0] || "";
-      const lastName = parts.slice(1).join(" ") || "";
-
-      let linkedinUrl = contact.social || "";
-      let email = contact.email || "";
-
-      // 1. If we don't have a social link, search & enrich via LinkUp
-      if (!linkedinUrl && firstName) {
-        console.log(`Searching LinkedIn profile for: ${contact.name} (${companyName})`);
-        const enrichResponse = await fetch('https://mcp.linkupapi.com/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: Date.now(),
-            method: 'tools/call',
-            params: {
-              name: 'linkupapi_enrich',
-              arguments: {
-                action: 'enrich_person',
-                params: {
-                  first_name: firstName,
-                  last_name: lastName,
-                  company_name: companyName || ""
-                }
-              }
-            }
-          })
-        });
-
-        const enrichText = await enrichResponse.text();
-        const lines = enrichText.split('\n');
-        for (const line of lines) {
-          if (line.trim().startsWith('data: ')) {
-            const payloadStr = line.trim().substring(6).trim();
-            try {
-              const parsed = JSON.parse(payloadStr);
-              if (parsed.result && parsed.result.content && parsed.result.content[0]) {
-                const innerText = parsed.result.content[0].text;
-                const innerJson = JSON.parse(innerText);
-                if (innerJson.linkedin_profile && innerJson.linkedin_profile.linkedin_url) {
-                  linkedinUrl = innerJson.linkedin_profile.linkedin_url;
-                  console.log(`Verified LinkedIn url found: ${linkedinUrl}`);
-                }
-              }
-            } catch (pErr) {
-              console.error("Error parsing inner JSON-RPC payload:", pErr);
-            }
-          }
-        }
-      }
-
-      // 2. Query email finder if email is missing and we have a LinkedIn URL
-      if (!email && linkedinUrl) {
-        console.log(`Retrieving email coordinates for ${contact.name} at: ${linkedinUrl}`);
-        const emailResponse = await fetch('https://mcp.linkupapi.com/mcp', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: Date.now(),
-            method: 'tools/call',
-            params: {
-              name: 'linkupapi_enrich',
-              arguments: {
-                action: 'find_email',
-                params: {
-                  linkedin_url: linkedinUrl
-                }
-              }
-            }
-          })
-        });
-
-        const emailText = await emailResponse.text();
-        const lines = emailText.split('\n');
-        for (const line of lines) {
-          if (line.trim().startsWith('data: ')) {
-            const payloadStr = line.trim().substring(6).trim();
-            try {
-              const parsed = JSON.parse(payloadStr);
-              if (parsed.result && parsed.result.content && parsed.result.content[0]) {
-                const innerText = parsed.result.content[0].text;
-                const innerJson = JSON.parse(innerText);
-                if (innerJson.email) {
-                  email = innerJson.email;
-                  console.log(`Retrieved email: ${email}`);
-                } else if (innerJson.alternatives && innerJson.alternatives.length > 0) {
-                  email = innerJson.alternatives[0];
-                  console.log(`Retrieved alternative email: ${email}`);
-                }
-              }
-            } catch (pErr) {
-              console.error("Error parsing find_email inner response:", pErr);
-            }
-          }
-        }
-      }
-
-      updatedContacts.push({
-        ...contact,
-        social: linkedinUrl || contact.social,
-        email: email || contact.email
-      });
-    } catch (e: any) {
-      console.error(`Error enriching contact ${contact.name}:`, e.message);
-      updatedContacts.push(contact); // keep as-is on error
-    }
+  if (!apiKey) {
+    console.warn("WARNING: LINKUP_API_KEY environment variable is not set. Contact enrichment will be skipped.");
   }
 
-  res.json({ contacts: updatedContacts });
+  console.log(`Contact Enrichment request for ${contacts.length} contacts at ${companyName || 'Unknown company'}`);
+
+  try {
+    const updatedContacts = await Promise.all(
+      contacts.map(async (contact) => {
+        if (!contact || !contact.name) {
+          return contact;
+        }
+
+        try {
+          const parts = contact.name.trim().split(/\s+/);
+          const firstName = parts[0] || "";
+          const lastName = parts.slice(1).join(" ") || "";
+
+          let linkedinUrl = contact.social || "";
+          let email = contact.email || "";
+
+          // Skip calls if API key is not present
+          if (!apiKey) {
+            return contact;
+          }
+
+          // 1. If we don't have a social link, search & enrich via LinkUp
+          if (!linkedinUrl && firstName) {
+            console.log(`Searching LinkedIn profile for: ${contact.name} (${companyName})`);
+            const enrichResponse = await fetch('https://mcp.linkupapi.com/mcp', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'tools/call',
+                params: {
+                  name: 'linkupapi_enrich',
+                  arguments: {
+                    action: 'enrich_person',
+                    params: {
+                      first_name: firstName,
+                      last_name: lastName,
+                      company_name: companyName || ""
+                    }
+                  }
+                }
+              })
+            });
+
+            if (enrichResponse.ok) {
+              const enrichText = await enrichResponse.text();
+              const lines = enrichText.split('\n');
+              for (const line of lines) {
+                if (line.trim().startsWith('data: ')) {
+                  const payloadStr = line.trim().substring(6).trim();
+                  try {
+                    const parsed = JSON.parse(payloadStr);
+                    if (parsed.result && parsed.result.content && parsed.result.content[0]) {
+                      const innerText = parsed.result.content[0].text;
+                      const innerJson = JSON.parse(innerText);
+                      if (innerJson.linkedin_profile && innerJson.linkedin_profile.linkedin_url) {
+                        linkedinUrl = innerJson.linkedin_profile.linkedin_url;
+                        console.log(`Verified LinkedIn url found: ${linkedinUrl}`);
+                      }
+                    }
+                  } catch (pErr) {
+                    console.error("Error parsing inner JSON-RPC payload:", pErr);
+                  }
+                }
+              }
+            } else {
+              console.error(`LinkUp enrich person failed: ${enrichResponse.status} ${enrichResponse.statusText}`);
+            }
+          }
+
+          // 2. Query email finder if email is missing and we have a LinkedIn URL
+          if (!email && linkedinUrl) {
+            console.log(`Retrieving email coordinates for ${contact.name} at: ${linkedinUrl}`);
+            const emailResponse = await fetch('https://mcp.linkupapi.com/mcp', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'tools/call',
+                params: {
+                  name: 'linkupapi_enrich',
+                  arguments: {
+                    action: 'find_email',
+                    params: {
+                      linkedin_url: linkedinUrl
+                    }
+                  }
+                }
+              })
+            });
+
+            if (emailResponse.ok) {
+              const emailText = await emailResponse.text();
+              const lines = emailText.split('\n');
+              for (const line of lines) {
+                if (line.trim().startsWith('data: ')) {
+                  const payloadStr = line.trim().substring(6).trim();
+                  try {
+                    const parsed = JSON.parse(payloadStr);
+                    if (parsed.result && parsed.result.content && parsed.result.content[0]) {
+                      const innerText = parsed.result.content[0].text;
+                      const innerJson = JSON.parse(innerText);
+                      if (innerJson.email) {
+                        email = innerJson.email;
+                        console.log(`Retrieved email: ${email}`);
+                      } else if (innerJson.alternatives && innerJson.alternatives.length > 0) {
+                        email = innerJson.alternatives[0];
+                        console.log(`Retrieved alternative email: ${email}`);
+                      }
+                    }
+                  } catch (pErr) {
+                    console.error("Error parsing find_email inner response:", pErr);
+                  }
+                }
+              }
+            } else {
+              console.error(`LinkUp find email failed: ${emailResponse.status} ${emailResponse.statusText}`);
+            }
+          }
+
+          return {
+            ...contact,
+            social: linkedinUrl || contact.social,
+            email: email || contact.email
+          };
+        } catch (e: any) {
+          console.error(`Error enriching contact ${contact?.name || 'unknown'}:`, e.message);
+          return contact; // keep as-is on error
+        }
+      })
+    );
+
+    res.json({ contacts: updatedContacts });
+  } catch (error: any) {
+    console.error("Endpoint contacts-enrich overall error:", error);
+    res.status(500).json({ error: "Failed to enrich contacts", details: error.message });
+  }
+});
+
+// Find more contacts using Gemini Search tool
+app.post("/api/find-more-contacts", async (req, res) => {
+  const { companyName, existingNames, searchType } = req.body;
+  if (!companyName) {
+    return res.status(400).json({ error: "Company/Event name is required" });
+  }
+
+  const model = "gemini-3.5-flash";
+  const currentSearchType = searchType || "event";
+  const existingNamesArray = Array.isArray(existingNames) ? existingNames : [];
+  const existingListStr = existingNamesArray.length > 0 ? existingNamesArray.join(", ") : "None";
+
+  console.log(`Find More Contacts request for: ${companyName} (${currentSearchType}), excluding: [${existingListStr}]`);
+
+  try {
+    let prompt = "";
+    if (currentSearchType === "vendor") {
+      prompt = `Find 3 additional key contacts, executives, managers, or employees for the company/vendor "${companyName}".
+      The following contacts are already in our list: [${existingListStr}]. 
+      You MUST search for NEW contacts that are NOT in this list (do not return duplicates).
+      
+      Return a JSON object containing a list of contacts with their role, name, email, phone, and social handle (LinkedIn profile URL).`;
+    } else {
+      prompt = `Find 3 additional key contacts, organizers, directors, or representatives for the trade show/conference/event "${companyName}".
+      The following contacts are already in our list: [${existingListStr}].
+      You MUST search for NEW contacts that are NOT in this list (do not return duplicates).
+      
+      Return a JSON object containing a list of contacts with their role, name, email, phone, and social handle (LinkedIn profile URL).`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            contacts: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  role: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  email: { type: Type.STRING, description: "Public email or empty" },
+                  phone: { type: Type.STRING, description: "Public phone or empty" },
+                  social: { type: Type.STRING, description: "LinkedIn URL or empty" }
+                },
+                required: ["role", "name"]
+              }
+            }
+          },
+          required: ["contacts"]
+        }
+      }
+    });
+
+    const result = JSON.parse(response.text);
+    // Ensure all contacts have email/phone/social fields populated (at least as empty strings)
+    const cleanedContacts = (result.contacts || []).map((c: any) => ({
+      role: c.role || "",
+      name: c.name || "",
+      email: c.email || "",
+      phone: c.phone || "",
+      social: c.social || ""
+    }));
+
+    res.json({ contacts: cleanedContacts });
+  } catch (error: any) {
+    console.error("Find More Contacts Gemini Error, falling back to simulation:", error.message);
+    
+    // Fallback logic
+    const mockNames = ["David Miller", "Karen Taylor", "Robert Garcia", "Linda Martinez", "James Wilson"];
+    const mockRoles = currentSearchType === "vendor" 
+      ? ["Marketing Coordinator", "Operations Director", "Account Executive"]
+      : ["Marketing Coordinator", "Operations Manager", "Public Relations Advisor"];
+    
+    const domain = companyName.toLowerCase().replace(/[^a-z0-9]/g, '') || "example";
+    
+    const filteredMockContacts = mockNames
+      .filter(name => !existingNamesArray.some((ex: string) => ex.toLowerCase() === name.toLowerCase()))
+      .slice(0, 3)
+      .map((name, i) => ({
+        role: mockRoles[i % mockRoles.length],
+        name: name,
+        email: `${name.toLowerCase().replace(/\s+/g, ".")}@${domain}.com`,
+        phone: `+1 (555) 019-${100 + i}`,
+        social: `https://linkedin.com/in/${name.toLowerCase().replace(/\s+/g, "-")}-${domain}`
+      }));
+
+    res.json({ contacts: filteredMockContacts });
+  }
 });
 
 // Vite middleware for development
