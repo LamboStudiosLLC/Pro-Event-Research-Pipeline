@@ -325,6 +325,10 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [newTemplateName, setNewTemplateName] = useState("");
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isContactSelectorOpen, setIsContactSelectorOpen] = useState(false);
+  const [selectedComposeContact, setSelectedComposeContact] = useState<any>(null);
+  const [isMailClientSelectorOpen, setIsMailClientSelectorOpen] = useState(false);
+  const [preferredMailClient, setPreferredMailClient] = useState<string | null>(() => localStorage.getItem("preferred_mail_client"));
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
   const handleDeleteTemplate = (id: string) => {
     const updated = templates.filter((t) => t.id !== id);
@@ -356,12 +360,11 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     }
   }, [isExpanded]);
 
-  const applyReplacements = (tplText: string) => {
+  const applyReplacementsForContact = (tplText: string, contact: any) => {
     let text = tplText;
     const nameVal = event.eventName;
     const salespersonName = userDisplayName || "Sales Representative";
-    const contactNameVal =
-      (event.contacts && event.contacts[0]?.name) || "Team";
+    const contactNameVal = contact?.name || "Team";
 
     // replace variables
     text = text.replace(/\[Event Name\]/gi, nameVal);
@@ -375,13 +378,8 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     return text;
   };
 
-  const handleSelectTemplate = async (id: string) => {
-    setSelectedTemplateId(id);
-    if (!id) {
-      setEmailText("");
-      return;
-    }
-    const found = templates.find((t) => t.id === id);
+  const applyTemplateForContact = async (templateId: string, contact: any) => {
+    const found = templates.find((t) => t.id === templateId);
     if (found) {
       let currentVars = found.variations;
       let idx = found.currentIndex || 0;
@@ -391,12 +389,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       }
 
       const rawText = currentVars[idx % currentVars.length];
-      const resolved = applyReplacements(rawText);
+      const resolved = applyReplacementsForContact(rawText, contact);
       setEmailText(resolved);
+      setSelectedComposeContact(contact);
 
       const nextIndex = (idx + 1) % currentVars.length;
       const updated = templates.map((t) =>
-        t.id === id
+        t.id === templateId
           ? { ...t, variations: currentVars, currentIndex: nextIndex }
           : t,
       );
@@ -414,7 +413,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           if (data.variations && Array.isArray(data.variations)) {
             setTemplates((prev) => {
               const live = prev.map((t) =>
-                t.id === id ? { ...t, variations: data.variations } : t,
+                t.id === templateId ? { ...t, variations: data.variations } : t,
               );
               localStorage.setItem("email_templates", JSON.stringify(live));
               return live;
@@ -424,6 +423,22 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
           console.error("Failed to fetch variations in background:", e);
         }
       }
+    }
+  };
+
+  const handleSelectTemplate = async (id: string) => {
+    setSelectedTemplateId(id);
+    if (!id) {
+      setEmailText("");
+      setSelectedComposeContact(null);
+      return;
+    }
+    const contactsList = event.contacts || [];
+    if (contactsList.length > 0) {
+      setPendingTemplateId(id);
+      setIsContactSelectorOpen(true);
+    } else {
+      applyTemplateForContact(id, null);
     }
   };
 
@@ -496,14 +511,50 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setTimeout(() => setCopiedDraft(false), 2000);
   };
 
-  const handleLaunchEmailProgram = () => {
-    const contactsList = event.contacts || [];
-    if (contactsList.length > 0) {
-      setIsContactSelectorOpen(true);
-    } else {
-      const subject = `Outreach - ${event.eventName}`;
-      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+  const launchEmailClient = (clientKey: string) => {
+    const toEmail = selectedComposeContact?.email || "";
+    const subject = `Outreach - ${event.eventName}`;
+    
+    // Remember preference if checkbox checked
+    const checkbox = document.getElementById(`remember_email_choice_${event.eventId}`) as HTMLInputElement;
+    if (checkbox?.checked) {
+      localStorage.setItem("preferred_mail_client", clientKey);
+      setPreferredMailClient(clientKey);
     }
+    
+    let url = "";
+    if (clientKey === "gmail") {
+      url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(toEmail)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+    } else if (clientKey === "outlook") {
+      url = `https://outlook.live.com/owa/?path=/mail/action/compose&to=${encodeURIComponent(toEmail)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+    } else if (clientKey === "yahoo") {
+      url = `https://compose.mail.yahoo.com/?to=${encodeURIComponent(toEmail)}&subj=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+    } else {
+      url = `mailto:${encodeURIComponent(toEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+    }
+
+    if (clientKey === "default") {
+      window.location.href = url;
+    } else {
+      window.open(url, "_blank");
+    }
+    setIsMailClientSelectorOpen(false);
+  };
+
+  const handleLaunchEmailProgram = () => {
+    if (preferredMailClient) {
+      launchEmailClient(preferredMailClient);
+    } else {
+      setIsMailClientSelectorOpen(true);
+    }
+  };
+
+  const handleCancelContactSelect = () => {
+    setIsContactSelectorOpen(false);
+    if (pendingTemplateId) {
+      applyTemplateForContact(pendingTemplateId, null);
+    }
+    setPendingTemplateId(null);
   };
 
   const notesList = event.actionNotes || [];
@@ -1047,6 +1098,49 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                   </div>
                 </div>
 
+                {/* To Recipient Selector Row */}
+                <div className="flex items-center gap-2 px-1 text-xs text-slate-350 shrink-0">
+                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-500">To:</span>
+                  <div className="relative flex-1 max-w-[280px]">
+                    <select
+                      value={selectedComposeContact ? (event.contacts || []).indexOf(selectedComposeContact) : -1}
+                      onChange={(e) => {
+                        const idx = parseInt(e.target.value);
+                        const contact = idx >= 0 ? (event.contacts || [])[idx] : null;
+                        setSelectedComposeContact(contact);
+                        // If there is an active template, re-apply replacements for this contact
+                        if (selectedTemplateId) {
+                          const found = templates.find(t => t.id === selectedTemplateId);
+                          if (found) {
+                            let currentVars = found.variations;
+                            let idx = found.currentIndex || 0;
+                            if (!currentVars || currentVars.length < 2) {
+                              currentVars = generateLocalVariationsClient(found.text);
+                            }
+                            const rawText = currentVars[idx % currentVars.length];
+                            const resolved = applyReplacementsForContact(rawText, contact);
+                            setEmailText(resolved);
+                          }
+                        }
+                      }}
+                      className="bg-black/60 border border-white/10 hover:border-white/20 rounded px-2.5 py-1 text-[11px] text-white focus:outline-none focus:border-primary/40 cursor-pointer w-full appearance-none pr-8 font-sans font-medium"
+                    >
+                      <option value={-1}>-- Select Recipient / Team --</option>
+                      {(event.contacts || []).map((contact, idx) => (
+                        <option key={idx} value={idx}>
+                          {contact.name} {contact.role ? `(${contact.role})` : ""} {contact.email ? `[${contact.email}]` : "[No email]"}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[10px]">▼</div>
+                  </div>
+                  {selectedComposeContact && (
+                    <span className="text-[10px] text-slate-450 truncate">
+                      Using: <span className="text-white font-semibold font-mono">{selectedComposeContact.name}</span>
+                    </span>
+                  )}
+                </div>
+
                 {/* Body Composition space - utilizes the full remaining height of the container */}
                 <div className="relative select-text flex-grow flex flex-col min-h-[180px] md:min-h-[220px]">
                   <textarea
@@ -1081,14 +1175,29 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                     </button>
 
                     {/* Open in Default Email Client */}
-                    <button
-                      type="button"
-                      onClick={handleLaunchEmailProgram}
-                      className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-primary hover:bg-secondary text-slate-900 font-bold rounded-lg text-[9px] cursor-pointer transition-all shadow-md shrink-0"
-                    >
-                      <Zap className="h-3.5 w-3.5 text-slate-900 animate-pulse" />
-                      <span>New Email</span>
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleLaunchEmailProgram}
+                        className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-primary hover:bg-secondary text-slate-900 font-bold rounded-lg text-[9px] cursor-pointer transition-all shadow-md"
+                      >
+                        <Zap className="h-3.5 w-3.5 text-slate-900 animate-pulse" />
+                        <span>New Email {preferredMailClient ? `(${preferredMailClient === 'gmail' ? 'Gmail' : preferredMailClient === 'outlook' ? 'Outlook' : preferredMailClient === 'yahoo' ? 'Yahoo' : 'Default'})` : ""}</span>
+                      </button>
+                      {preferredMailClient && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreferredMailClient(null);
+                            localStorage.removeItem("preferred_mail_client");
+                          }}
+                          className="px-1.5 py-1.5 text-[9.5px] text-slate-455 hover:text-white hover:bg-white/5 border border-transparent rounded-lg transition-all cursor-pointer font-mono"
+                          title="Change preferred email client"
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
 
                     {/* Mark as Sent button */}
                     <button
@@ -1428,10 +1537,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                       key={idx}
                       type="button"
                       onClick={() => {
-                        const mailToAddr = contact.email || "";
-                        const subject = `Outreach - ${event.eventName}`;
-                        window.location.href = `mailto:${encodeURIComponent(mailToAddr)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+                        if (pendingTemplateId) {
+                          applyTemplateForContact(pendingTemplateId, contact);
+                        } else {
+                          setSelectedComposeContact(contact);
+                        }
                         setIsContactSelectorOpen(false);
+                        setPendingTemplateId(null);
                       }}
                       className="w-full text-left p-2.5 rounded-lg bg-white/[0.02] hover:bg-primary/10 border border-white/5 hover:border-primary/25 transition-all flex flex-col gap-0.5 group/item cursor-pointer"
                     >
@@ -1457,14 +1569,18 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const subject = `Outreach - ${event.eventName}`;
-                      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailText)}`;
+                      if (pendingTemplateId) {
+                        applyTemplateForContact(pendingTemplateId, null);
+                      } else {
+                        setSelectedComposeContact(null);
+                      }
                       setIsContactSelectorOpen(false);
+                      setPendingTemplateId(null);
                     }}
                     className="w-full text-left p-2 rounded-lg bg-black/40 hover:bg-white/5 border border-dashed border-white/10 hover:border-white/20 transition-all flex flex-col items-center justify-center text-slate-450 hover:text-white cursor-pointer"
                   >
                     <span className="text-[10px] font-bold uppercase tracking-wider">
-                      Send without recipient
+                      Use "Team" (No recipient)
                     </span>
                     <span className="text-[7.5px] text-slate-500 font-mono">
                       Fill in To: field manually in draft
@@ -1475,8 +1591,107 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 <div className="flex justify-end pt-1">
                   <button
                     type="button"
-                    onClick={() => setIsContactSelectorOpen(false)}
+                    onClick={handleCancelContactSelect}
                     className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/5 hover:border-white/10 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Select Email Client Modal */}
+          {isMailClientSelectorOpen && (
+            <div className="absolute inset-0 z-40 bg-zinc-950/90 flex items-center justify-center p-4">
+              <div className="bg-[#0b0f19] border border-primary/25 rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl relative select-text">
+                <div>
+                  <h6 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                    Select Email Client
+                  </h6>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Choose how you would like to open this email draft.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      launchEmailClient("default");
+                    }}
+                    className="w-full text-left p-2.5 rounded-lg bg-white/[0.02] hover:bg-primary/10 border border-white/5 hover:border-primary/25 transition-all flex flex-col gap-0.5 group/item cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-slate-200 group-hover/item:text-primary transition-colors">
+                      Default Mail App
+                    </span>
+                    <span className="text-[9px] text-slate-455">
+                      Opens Outlook, Mac Mail, Windows Mail (via mailto)
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      launchEmailClient("gmail");
+                    }}
+                    className="w-full text-left p-2.5 rounded-lg bg-white/[0.02] hover:bg-primary/10 border border-white/5 hover:border-primary/25 transition-all flex flex-col gap-0.5 group/item cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-slate-200 group-hover/item:text-primary transition-colors">
+                      Google Gmail (Web)
+                    </span>
+                    <span className="text-[9px] text-slate-455">
+                      Opens compose window in mail.google.com
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      launchEmailClient("outlook");
+                    }}
+                    className="w-full text-left p-2.5 rounded-lg bg-white/[0.02] hover:bg-primary/10 border border-white/5 hover:border-primary/25 transition-all flex flex-col gap-0.5 group/item cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-slate-200 group-hover/item:text-primary transition-colors">
+                      Outlook Web (OWA)
+                    </span>
+                    <span className="text-[9px] text-slate-455">
+                      Opens compose window in outlook.live.com
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      launchEmailClient("yahoo");
+                    }}
+                    className="w-full text-left p-2.5 rounded-lg bg-white/[0.02] hover:bg-primary/10 border border-white/5 hover:border-primary/25 transition-all flex flex-col gap-0.5 group/item cursor-pointer"
+                  >
+                    <span className="text-xs font-semibold text-slate-200 group-hover/item:text-primary transition-colors">
+                      Yahoo Mail (Web)
+                    </span>
+                    <span className="text-[9px] text-slate-455">
+                      Opens compose window in yahoo.com mail
+                    </span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id={`remember_email_choice_${event.eventId}`}
+                      className="rounded border-white/10 bg-zinc-900 text-primary focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                    />
+                    <span className="text-[9px] text-slate-400 select-none">
+                      Remember choice
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsMailClientSelectorOpen(false)}
+                    className="px-3 py-1 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-lg text-[9px] font-bold cursor-pointer transition-all"
                   >
                     Cancel
                   </button>
