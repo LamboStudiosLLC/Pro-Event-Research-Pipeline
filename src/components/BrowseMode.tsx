@@ -224,6 +224,8 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const [minAttendance, setMinAttendance] = useState(10);
   const [maxAttendance, setMaxAttendance] = useState(150000);
   const [eventType, setEventType] = useState('');
+  const [eventName, setEventName] = useState('');
+  const [vendorName, setVendorName] = useState('');
   const [location, setLocation] = useState('');
   const [servicesOffered, setServicesOffered] = useState('');
   const [category, setCategory] = useState('');
@@ -385,7 +387,9 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           endDate,
           minAttendance,
           maxAttendance,
-          eventType
+          eventType,
+          eventName,
+          vendorName
         })
       });
 
@@ -810,6 +814,20 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                 </div>
               </div>
 
+              {/* Event Name */}
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">Event Name</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="e.g. CES or Consumer Electronics Show"
+                    value={eventName}
+                    onChange={e => setEventName(e.target.value)}
+                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                  />
+                </div>
+              </div>
+
               {/* Event Type */}
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">Event Type</label>
@@ -831,6 +849,20 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           ) : (
             /* Vendor Fields */
             <div className="space-y-3 shrink-0">
+              {/* Vendor Name */}
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">Vendor Name</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="e.g. Freeman or GES"
+                    value={vendorName}
+                    onChange={e => setVendorName(e.target.value)}
+                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                  />
+                </div>
+              </div>
+
               {/* Services Offered */}
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">Services Offered</label>

@@ -31,6 +31,7 @@ const SalespersonDetail: React.FC<DetailViewProps> = ({ user, onBack }) => {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   
   const [search, setSearch] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'eventName' | 'status' | 'date' | 'createdAt' | 'searchType' | 'location'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -204,10 +205,14 @@ const SalespersonDetail: React.FC<DetailViewProps> = ({ user, onBack }) => {
         const matchesFilter =
           statusFilter === 'all' ||
           e.status === statusFilter;
+
+        const matchesProject =
+          selectedProjectId === 'all' ||
+          e.projectId === selectedProjectId;
         
-        return matchesSearch && matchesFilter;
+        return matchesSearch && matchesFilter && matchesProject;
       });
-  }, [events, search, statusFilter]);
+  }, [events, search, statusFilter, selectedProjectId]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -314,16 +319,36 @@ const SalespersonDetail: React.FC<DetailViewProps> = ({ user, onBack }) => {
 
       {/* Filter and sorting control bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-zinc-950/45 border border-white/5 rounded-2xl p-4 shrink-0 shadow-lg backdrop-blur-md">
-        {/* Search */}
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search leads..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-zinc-900/60 border border-white/10 rounded-lg text-xs text-white placeholder-slate-500 outline-none focus:border-primary/50"
-          />
+        {/* Project Selector + Search */}
+        <div className="flex flex-1 items-center gap-3 min-w-0 w-full">
+          {/* Project Dropdown */}
+          <div className="relative shrink-0">
+            <select
+              value={selectedProjectId}
+              onChange={e => setSelectedProjectId(e.target.value)}
+              className="bg-zinc-900 border border-white/10 rounded-lg px-3 py-2 pr-8 text-xs text-white font-medium cursor-pointer appearance-none outline-none focus:border-primary/50"
+            >
+              <option value="all">All Projects</option>
+              {Object.entries(projectNames).map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[10px]">▼</div>
+          </div>
+
+          {/* Search */}
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search leads..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-zinc-900/60 border border-white/10 rounded-lg text-xs text-white placeholder-slate-500 outline-none focus:border-primary/50"
+            />
+          </div>
         </div>
 
         {/* Filters and Sorting */}

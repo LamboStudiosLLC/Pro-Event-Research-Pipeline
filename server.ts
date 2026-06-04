@@ -34,7 +34,9 @@ app.post("/api/browse", async (req, res) => {
     endDate,
     minAttendance,
     maxAttendance,
-    eventType
+    eventType,
+    eventName,
+    vendorName
   } = req.body || {};
 
   const currentPage = page || 1;
@@ -45,6 +47,7 @@ app.post("/api/browse", async (req, res) => {
     let prompt = "";
     if (searchType === "vendor") {
       prompt = `Search for exactly 10 professional trade show, conference, or event vendors/suppliers/agencies/contractors that fit the following criteria:
+      ${vendorName ? `- Vendor Name / Specific Keywords: ${vendorName}` : ""}
       - Location / HQ Region: ${location || "Any region/global"}
       - Professional services offered: ${servicesOffered || "Any event industry services"}
       - Specialty categories: ${category || "Any specialty"}
@@ -67,6 +70,7 @@ app.post("/api/browse", async (req, res) => {
       const formattedEventType = eventType ? `Event type of ${eventType}` : "Conventions, Trade Shows, Workshops, or Conferences";
 
       prompt = `Search for exactly 10 professional conventions, trade shows, expositions, or industry conferences that fit the following criteria:
+      ${eventName ? `- Event Name / Specific Keywords: ${eventName}` : ""}
       - Event Type limit: ${formattedEventType}
       - Date / Month range: ${formattedDates}
       - Location / Venue city: ${location || "Any region/global"}
