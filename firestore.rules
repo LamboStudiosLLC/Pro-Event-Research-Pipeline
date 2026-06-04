@@ -24,6 +24,11 @@ service cloud.firestore {
     function isOwner(userId) { 
       return isSignedIn() && request.auth.uid == userId; 
     }
+    function isAdmin() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
 
     // 3. Validation Blueprints
     function isValidUser(data) {
@@ -52,23 +57,29 @@ service cloud.firestore {
 
     // 4. Match Blocks
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isOwner(userId) || isAdmin();
 
       match /projects/{projectId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
 
         match /events/{eventId} {
-          allow read, write: if isOwner(userId);
+          allow read, write: if isOwner(userId) || isAdmin();
         }
 
         match /research_cue/{cueId} {
-          allow read, write: if isOwner(userId);
+          allow read, write: if isOwner(userId) || isAdmin();
         }
 
         match /scans/{scanId} {
-          allow read, write: if isOwner(userId);
+          allow read, write: if isOwner(userId) || isAdmin();
         }
       }
+    }
+
+    match /claimed_leads/{claimId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && incoming().claimedBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && (existing().claimedBy == request.auth.uid || isAdmin());
     }
   }
 }
