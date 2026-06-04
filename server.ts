@@ -36,7 +36,7 @@ app.post("/api/browse", async (req, res) => {
     minAttendance,
     maxAttendance,
     eventType
-  } = req.body;
+  } = req.body || {};
 
   const currentPage = page || 1;
   const startIdx = (currentPage - 1) * 10 + 1;
@@ -156,7 +156,7 @@ app.post("/api/browse", async (req, res) => {
 });
 
 app.post("/api/research", async (req, res) => {
-  const { eventName, filters, model, searchType } = req.body;
+  const { eventName, filters, model, searchType } = req.body || {};
   if (!eventName) {
     return res.status(400).json({ error: "Event name is required" });
   }
@@ -354,7 +354,7 @@ function generateLocalVariations(text: string): string[] {
 
 // Generate 20 variations of email with slight copywriting deviations using LLM
 app.post("/api/email-variations", async (req, res) => {
-  const { text } = req.body;
+  const { text } = req.body || {};
   if (!text) {
     return res.status(400).json({ error: "Email template text is required" });
   }
@@ -409,7 +409,7 @@ Return exactly 20 distinct variations inside a JSON array under the key "variati
 
 // Linkup LinkedIn Verification & Contact Enrichment
 app.post("/api/contacts-enrich", async (req, res) => {
-  const { contacts, companyName } = req.body;
+  const { contacts, companyName } = req.body || {};
   if (!contacts || !Array.isArray(contacts)) {
     return res.status(400).json({ error: "Contacts array is required" });
   }
@@ -569,7 +569,7 @@ app.post("/api/contacts-enrich", async (req, res) => {
 
 // Find more contacts using Gemini Search tool
 app.post("/api/find-more-contacts", async (req, res) => {
-  const { companyName, existingNames, searchType } = req.body;
+  const { companyName, existingNames, searchType } = req.body || {};
   if (!companyName) {
     return res.status(400).json({ error: "Company/Event name is required" });
   }
