@@ -33,10 +33,23 @@ import {
   Image,
   Upload,
   AlertCircle,
-  Edit3
+  Edit3,
+  Flame,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
+
+interface ImportModalContact {
+  role: string;
+  name: string;
+  email: string;
+  phone: string;
+  social: string;
+  selected: boolean;
+  isNew: boolean;
+  enrichedFields?: string[];
+}
 
 const getSimulatedResult = (name: string, searchType: 'event' | 'vendor'): ResearchResult => {
   const cleanName = name.trim();
@@ -326,6 +339,27 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const [isSingleSelectionMode, setIsSingleSelectionMode] = useState(false);
   const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
   const [isFindingMore, setIsFindingMore] = useState(false);
+  const [isScrapingFirecrawl, setIsScrapingFirecrawl] = useState(false);
+
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importModalContacts, setImportModalContacts] = useState<ImportModalContact[]>([]);
+  const [importModalSource, setImportModalSource] = useState<'firecrawl' | 'findMore'>('firecrawl');
+
+  const [projects, setProjects] = useState<any[]>([]);
+  const [isTransferDropdownOpen, setIsTransferDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = fsQuery(collection(db, 'users', user.uid, 'projects'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const projs = snapshot.docs.map(d => ({
+        projectId: d.id,
+        ...d.data()
+      }));
+      setProjects(projs);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   const handleLinkedInVerify = async () => {
     if (!result || !result.contacts || result.contacts.length === 0) {
@@ -536,61 +570,56 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       const data = await response.json();
       if (data && data.contacts && Array.isArray(data.contacts)) {
         const newContacts = data.contacts;
+        const currentContacts = result.contacts || [];
+        const processed: ImportModalContact[] = [];
 
-        if (newContacts.length === 0) {
-          setVerifyStatusMessage("No additional contacts found.");
-          setTimeout(() => setVerifyStatusMessage(null), 4000);
-          return;
-        }
+        newContacts.forEach((nc: any) => {
+          if (!nc.name) return;
 
-        // Filter duplicates again on client side to be 100% safe
-        const uniqueNewContacts = newContacts.filter(nc => 
-          nc.name && !existingNames.some(existing => existing.toLowerCase() === nc.name.toLowerCase())
-        ).map(nc => ({
-          ...nc,
-          contactInfo: [nc.email, nc.phone, nc.social].filter(Boolean).join(' | ')
-        }));
+          const existing = currentContacts.find(
+            (cc) => cc.name && cc.name.toLowerCase().trim() === nc.name.toLowerCase().trim()
+          );
 
-        if (uniqueNewContacts.length === 0) {
-          setVerifyStatusMessage("No new additional contacts found.");
-          setTimeout(() => setVerifyStatusMessage(null), 4000);
-          return;
-        }
+          if (existing) {
+            const enrichedFields: string[] = [];
+            if (!existing.email && nc.email) enrichedFields.push("email");
+            if (!existing.phone && nc.phone) enrichedFields.push("phone");
+            if (!existing.social && nc.social) enrichedFields.push("social");
 
-        const updatedContacts = [...(result.contacts || []), ...uniqueNewContacts];
-        const updatedResult = {
-          ...result,
-          contacts: updatedContacts
-        };
-        setResult(updatedResult);
-
-        if (multipleResults.length > 0) {
-          const updatedMultiple = multipleResults.map((item, idx) => {
-            if (idx === currentResultIndex || item.eventName === result.eventName) {
-              return { ...item, contacts: updatedContacts };
+            if (enrichedFields.length > 0) {
+              processed.push({
+                role: nc.role || existing.role || 'Staff',
+                name: existing.name,
+                email: nc.email || existing.email || '',
+                phone: nc.phone || existing.phone || '',
+                social: nc.social || existing.social || '',
+                selected: true,
+                isNew: false,
+                enrichedFields
+              });
             }
-            return item;
-          });
-          setMultipleResults(updatedMultiple);
-        }
-
-        const evId = (result as any).eventId;
-        if (evId && user && activeProjectId) {
-          try {
-            const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
-            await setDoc(eventRef, {
-              contacts: updatedContacts
-            }, { merge: true });
-          } catch (err) {
-            console.error("Failed to update contacts on saved event:", err);
+          } else {
+            processed.push({
+              role: nc.role || 'Staff',
+              name: nc.name,
+              email: nc.email || '',
+              phone: nc.phone || '',
+              social: nc.social || '',
+              selected: true,
+              isNew: true
+            });
           }
-        } else {
-          // If not saved to pipeline yet, save to scans so they survive
-          await saveToScans(updatedResult);
-        }
+        });
 
-        setVerifyStatusMessage(`Success! Discovered and added ${uniqueNewContacts.length} new contact(s) to the sheet.`);
-        setTimeout(() => setVerifyStatusMessage(null), 6000);
+        if (processed.length > 0) {
+          setImportModalContacts(processed);
+          setImportModalSource('findMore');
+          setIsImportModalOpen(true);
+          setVerifyStatusMessage("Contacts Search Complete! Ready to preview results.");
+        } else {
+          setVerifyStatusMessage("Contacts Search Complete! No new contacts or details found.");
+          setTimeout(() => setVerifyStatusMessage(null), 4000);
+        }
       }
     } catch (err: any) {
       console.error("Find More Contacts error:", err);
@@ -598,6 +627,251 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
       setTimeout(() => setVerifyStatusMessage(null), 6000);
     } finally {
       setIsFindingMore(false);
+    }
+  };
+
+  const handleFirecrawlScrape = async () => {
+    if (!result || !result.website) {
+      alert("No website URL available to scrape.");
+      return;
+    }
+
+    setIsScrapingFirecrawl(true);
+    setVerifyStatusMessage(`Crawling & extracting contacts from ${result.website} via Firecrawl...`);
+
+    try {
+      const response = await fetch('/api/firecrawl-scrape', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          url: result.website,
+          companyName: result.eventName
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Scraping failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && data.contacts && Array.isArray(data.contacts)) {
+        const scraped = data.contacts;
+        const currentContacts = result.contacts || [];
+        const processed: ImportModalContact[] = [];
+
+        scraped.forEach((sc: any) => {
+          if (!sc.name) return;
+
+          const existing = currentContacts.find(
+            (cc) => cc.name && cc.name.toLowerCase().trim() === sc.name.toLowerCase().trim()
+          );
+
+          if (existing) {
+            const enrichedFields: string[] = [];
+            if (!existing.email && sc.email) enrichedFields.push("email");
+            if (!existing.phone && sc.phone) enrichedFields.push("phone");
+            if (!existing.social && sc.social) enrichedFields.push("social");
+
+            if (enrichedFields.length > 0) {
+              processed.push({
+                role: sc.role || existing.role || 'Staff',
+                name: existing.name,
+                email: sc.email || existing.email || '',
+                phone: sc.phone || existing.phone || '',
+                social: sc.social || existing.social || '',
+                selected: true,
+                isNew: false,
+                enrichedFields
+              });
+            }
+          } else {
+            processed.push({
+              role: sc.role || 'Staff',
+              name: sc.name,
+              email: sc.email || '',
+              phone: sc.phone || '',
+              social: sc.social || '',
+              selected: true,
+              isNew: true
+            });
+          }
+        });
+
+        if (processed.length > 0) {
+          setImportModalContacts(processed);
+          setImportModalSource('firecrawl');
+          setIsImportModalOpen(true);
+          setVerifyStatusMessage("Site Scrape Complete! Ready to preview results.");
+        } else {
+          setVerifyStatusMessage("Site Scrape Complete! Roster is already up to date.");
+          setTimeout(() => setVerifyStatusMessage(null), 4000);
+        }
+      }
+    } catch (err: any) {
+      console.error("Firecrawl Scrape error:", err);
+      setVerifyStatusMessage(`Scraping error: ${err.message || 'An error occurred during query'}`);
+      setTimeout(() => setVerifyStatusMessage(null), 6000);
+    } finally {
+      setIsScrapingFirecrawl(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!result) return;
+    const selectedToImport = importModalContacts.filter(c => c.selected);
+    if (selectedToImport.length === 0) {
+      alert("No contacts selected to import.");
+      return;
+    }
+
+    const currentContacts = [...(result.contacts || [])];
+    let addedCount = 0;
+    let enrichedCount = 0;
+
+    selectedToImport.forEach(item => {
+      if (item.isNew) {
+        currentContacts.push({
+          role: item.role,
+          name: item.name,
+          email: item.email,
+          phone: item.phone,
+          social: item.social,
+          contactInfo: [item.email, item.phone, item.social].filter(Boolean).join(' | ')
+        });
+        addedCount++;
+      } else {
+        const matchIdx = currentContacts.findIndex(cc => cc.name && cc.name.toLowerCase().trim() === item.name.toLowerCase().trim());
+        if (matchIdx !== -1) {
+          const existing = currentContacts[matchIdx];
+          let enrichedThisContact = false;
+          if (item.enrichedFields?.includes("email")) {
+            existing.email = item.email;
+            enrichedThisContact = true;
+          }
+          if (item.enrichedFields?.includes("phone")) {
+            existing.phone = item.phone;
+            enrichedThisContact = true;
+          }
+          if (item.enrichedFields?.includes("social")) {
+            existing.social = item.social;
+            enrichedThisContact = true;
+          }
+          if (enrichedThisContact) {
+            existing.contactInfo = [existing.email, existing.phone, existing.social].filter(Boolean).join(' | ');
+            enrichedCount++;
+          }
+        }
+      }
+    });
+
+    const updatedResult = {
+      ...result,
+      contacts: currentContacts
+    };
+    setResult(updatedResult);
+
+    if (multipleResults.length > 0) {
+      const updatedMultiple = multipleResults.map((item, idx) => {
+        if (idx === currentResultIndex || item.eventName === result.eventName) {
+          return { ...item, contacts: currentContacts };
+        }
+        return item;
+      });
+      setMultipleResults(updatedMultiple);
+    }
+
+    const evId = (result as any).eventId;
+    if (evId && user && activeProjectId) {
+      try {
+        const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
+        await setDoc(eventRef, {
+          contacts: currentContacts
+        }, { merge: true });
+      } catch (err) {
+        console.error("Failed to update contacts on saved event:", err);
+      }
+    } else {
+      await saveToScans(updatedResult);
+    }
+
+    setIsImportModalOpen(false);
+    
+    const sourceLabel = importModalSource === 'firecrawl' ? 'Site Scrape' : 'LinkedIn Search';
+    setVerifyStatusMessage(`${sourceLabel} Import Complete! Imported ${addedCount} new contact(s) and enriched ${enrichedCount} contact(s).`);
+    setTimeout(() => setVerifyStatusMessage(null), 6000);
+  };
+
+  const handleTransferLead = async (targetProjId: string, targetProjName: string) => {
+    if (!user || !activeProjectId || !result) return;
+
+    if (!confirm(`Are you sure you want to transfer "${result.eventName}" to project "${targetProjName}"?`)) {
+      return;
+    }
+
+    try {
+      const scanId = encodeURIComponent(result.eventName.toLowerCase().replace(/[^a-z0-9]/g, '-')).slice(0, 100);
+      const targetScanRef = doc(db, 'users', user.uid, 'projects', targetProjId, 'scans', scanId);
+
+      // 1. Copy lead data to scans collection of the target project
+      await setDoc(targetScanRef, {
+        eventName: result.eventName,
+        date: result.date || '',
+        location: result.location || '',
+        description: result.description || '',
+        contacts: result.contacts || [],
+        website: result.website || '',
+        logoUrl: result.logoUrl || '',
+        notes: result.notes || noteText || '',
+        actionNotes: result.actionNotes || [],
+        searchType: result.searchType || 'event',
+        yearFounded: result.yearFounded || '',
+        isSandbox: result.isSandbox || false,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+
+      // 2. Delete from current project events (pipeline)
+      const evId = (result as any).eventId;
+      if (evId) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId));
+      }
+
+      // 3. Delete from current project scans
+      const scanInList = scannedList.find(s => s.eventName.toLowerCase() === result.eventName.toLowerCase());
+      const currentScanId = scanInList?.scanId || scanId;
+      await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'scans', currentScanId));
+
+      // 4. Delete from current project cue
+      const cueItem = researchCue.find(c => c.eventName.toLowerCase() === result.eventName.toLowerCase());
+      if (cueItem) {
+        await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', cueItem.cueId));
+      }
+
+      // 5. Update local multiple results if active
+      if (multipleResults.length > 0) {
+        const updatedMultiple = multipleResults.filter(item => item.eventName.toLowerCase() !== result.eventName.toLowerCase());
+        setMultipleResults(updatedMultiple);
+        if (updatedMultiple.length > 0) {
+          const nextIdx = Math.min(currentResultIndex, updatedMultiple.length - 1);
+          setCurrentResultIndex(nextIdx);
+          setResult(updatedMultiple[nextIdx]);
+        } else {
+          setResult(null);
+          setQueryText('');
+          setIsSaved(false);
+        }
+      } else {
+        setResult(null);
+        setQueryText('');
+        setIsSaved(false);
+      }
+
+      setVerifyStatusMessage(`Successfully transferred "${result.eventName}" to "${targetProjName}".`);
+      setTimeout(() => setVerifyStatusMessage(null), 5000);
+    } catch (err: any) {
+      console.error("Failed to transfer lead:", err);
+      alert(`Failed to transfer lead: ${err.message || 'An error occurred'}`);
     }
   };
 
@@ -2578,6 +2852,53 @@ Pro Event Research Team`;
                   <Send className="h-3 w-3" />
                   <span>{isSaved ? "IN PIPELINE" : "MOVE TO PIPELINE"}</span>
                 </button>
+
+                {/* Transfer Lead Dropdown Button */}
+                <div className="relative inline-block">
+                  <button 
+                    onClick={() => setIsTransferDropdownOpen(!isTransferDropdownOpen)}
+                    className="flex items-center space-x-2 px-3 py-1.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3 animate-spin-slow" />
+                    <span>TRANSFER LEAD</span>
+                    <ChevronDown className="h-3 w-3 text-amber-400 shrink-0" />
+                  </button>
+
+                  {isTransferDropdownOpen && (
+                    <>
+                      {/* Backdrop to close dropdown on click outside */}
+                      <div className="fixed inset-0 z-30" onClick={() => setIsTransferDropdownOpen(false)} />
+                      <div className="absolute right-0 mt-1.5 w-52 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-1 z-40 flex flex-col gap-0.5 max-h-60 overflow-y-auto custom-scrollbar select-none">
+                        <div className="px-2.5 py-1 text-[8px] font-extrabold uppercase text-slate-500 tracking-wider border-b border-white/5 pb-1 mb-1">
+                          Transfer to Project:
+                        </div>
+                        {projects.filter(p => p.projectId !== activeProjectId).length === 0 ? (
+                          <div className="px-2.5 py-2 text-[10px] text-slate-500 italic text-center">
+                            No other projects found
+                          </div>
+                        ) : (
+                          projects
+                            .filter(p => p.projectId !== activeProjectId)
+                            .map(p => (
+                              <button
+                                key={p.projectId}
+                                type="button"
+                                onClick={() => {
+                                  setIsTransferDropdownOpen(false);
+                                  handleTransferLead(p.projectId, p.name);
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer truncate"
+                                title={p.name}
+                              >
+                                {p.name}
+                              </button>
+                            ))
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <button 
                   onClick={downloadCSV}
                   className="flex items-center space-x-2 px-3 py-1.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20 transition-all cursor-pointer"
@@ -2703,58 +3024,70 @@ Pro Event Research Team`;
                         </button>
                       </div>
                     ) : (
-                      <div className="relative inline-block">
+                      <>
                         <button
                           type="button"
-                          onClick={() => setIsToolDropdownOpen(!isToolDropdownOpen)}
-                          disabled={isVerifyingLinkedIn || isFindingMore || !result || !result.contacts || result.contacts.length === 0}
-                          className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98] cursor-pointer"
+                          onClick={handleFirecrawlScrape}
+                          disabled={isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl || !result || !result.website}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-amber-500/25 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 active:scale-[0.98] cursor-pointer"
                         >
-                          <Zap className="h-3 w-3 shrink-0 text-primary animate-pulse" />
-                          <span>LinkedIn Tool</span>
-                          <ChevronDown className="h-3 w-3 text-primary shrink-0 transition-transform duration-200" style={{ transform: isToolDropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
+                          <Flame className="h-3 w-3 shrink-0 text-amber-500 animate-pulse" />
+                          <span>{isScrapingFirecrawl ? "Scraping..." : "Site Scrape+"}</span>
                         </button>
 
-                        {isToolDropdownOpen && (
-                          <>
-                            {/* Backdrop to close dropdown on click outside */}
-                            <div className="fixed inset-0 z-30" onClick={() => setIsToolDropdownOpen(false)} />
-                            <div className="absolute left-0 mt-1.5 w-44 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-1 z-40 flex flex-col gap-0.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsSingleSelectionMode(true);
-                                  setSelectedContacts([]);
-                                  setIsToolDropdownOpen(false);
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                              >
-                                Single Contacts
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsToolDropdownOpen(false);
-                                  handleLinkedInVerify();
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                              >
-                                All Contacts
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsToolDropdownOpen(false);
-                                  handleFindMoreContacts();
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                              >
-                                Find More Contacts
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            onClick={() => setIsToolDropdownOpen(!isToolDropdownOpen)}
+                            disabled={isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl || !result || !result.contacts || result.contacts.length === 0}
+                            className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-primary/20 bg-primary/10 hover:bg-primary/25 hover:border-primary/40 text-primary active:scale-[0.98] cursor-pointer"
+                          >
+                            <Zap className="h-3 w-3 shrink-0 text-primary animate-pulse" />
+                            <span>LinkedIn Tool</span>
+                            <ChevronDown className="h-3 w-3 text-primary shrink-0 transition-transform duration-200" style={{ transform: isToolDropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
+                          </button>
+
+                          {isToolDropdownOpen && (
+                            <>
+                              {/* Backdrop to close dropdown on click outside */}
+                              <div className="fixed inset-0 z-30" onClick={() => setIsToolDropdownOpen(false)} />
+                              <div className="absolute left-0 mt-1.5 w-44 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-1 z-40 flex flex-col gap-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsSingleSelectionMode(true);
+                                    setSelectedContacts([]);
+                                    setIsToolDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                >
+                                  Single Contacts
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsToolDropdownOpen(false);
+                                    handleLinkedInVerify();
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                >
+                                  All Contacts
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsToolDropdownOpen(false);
+                                    handleFindMoreContacts();
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                >
+                                  Find More Contacts
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </>
                     )}
                     <span className="text-[10px] text-slate-400 font-mono italic">Verification may take 1-3 minutes. Uses AI Credits.</span>
                   </div>
@@ -2764,7 +3097,7 @@ Pro Event Research Team`;
                   <div className="mb-3.5 p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-slate-200 transition-all duration-300">
                     <div className="flex items-center gap-2.5">
                       <span className="relative flex h-2 w-2 shrink-0">
-                        {isVerifyingLinkedIn || isFindingMore ? (
+                        {isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl ? (
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                         ) : null}
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-primary animate-pulse"></span>
@@ -3366,8 +3699,7 @@ Pro Event Research Team`;
         )}
       </main>
 
-      {/* Multiple Events Modal */}
-      {isMultipleModalOpen && (
+           {isMultipleModalOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -3456,6 +3788,129 @@ Pro Event Research Team`;
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Import Contacts Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#0e0f14] border border-white/10 rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+          >
+            <div className="flex items-center justify-between pb-4 border-b border-white/5">
+              <div className="flex items-center gap-2">
+                <Flame className="h-5 w-5 text-amber-500 animate-pulse" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Review & Import Scraped Contacts
+                </h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="p-1 hover:bg-white/5 rounded-full text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col min-h-0 pt-4">
+              <div className="flex items-center justify-between mb-4 gap-4">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Select the contacts you want to add or enrich in your roster. Checked items will be committed to the database.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected = importModalContacts.every(c => c.selected);
+                    setImportModalContacts(
+                      importModalContacts.map(c => ({ ...c, selected: !allSelected }))
+                    );
+                  }}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-bold uppercase tracking-wider cursor-pointer border border-white/5 transition-all active:scale-[0.98] shrink-0"
+                >
+                  {importModalContacts.every(c => c.selected) ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1 max-h-[400px]">
+                <table className="w-full text-left border-collapse table-fixed">
+                  <thead>
+                    <tr className="bg-white/[0.02] border-b border-white/5 text-[9px] text-slate-500 uppercase tracking-widest font-extrabold">
+                      <th className="p-2.5 w-[10%] text-center">Import</th>
+                      <th className="p-2.5 w-[20%]">Name</th>
+                      <th className="p-2.5 w-[22%]">Role/Title</th>
+                      <th className="p-2.5 w-[30%]">Details</th>
+                      <th className="p-2.5 w-[18%]">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-[11px] divide-y divide-white/5">
+                    {importModalContacts.map((contact, idx) => (
+                      <tr key={idx} className="hover:bg-white/[0.01] transition-colors">
+                        <td className="p-2.5 text-center">
+                          <div className="flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setImportModalContacts(
+                                  importModalContacts.map((c, i) => i === idx ? { ...c, selected: !c.selected } : c)
+                                );
+                              }}
+                              className={cn(
+                                "h-4 w-4 rounded border flex items-center justify-center transition-all cursor-pointer",
+                                contact.selected
+                                  ? "bg-primary border-primary text-black"
+                                  : "border-white/20 hover:border-white/40 bg-transparent text-transparent"
+                              )}
+                            >
+                              <Check className="h-2.5 w-2.5 stroke-[3]" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-2.5 font-semibold text-white truncate" title={contact.name}>{contact.name}</td>
+                        <td className="p-2.5 text-slate-300 truncate" title={contact.role}>{contact.role}</td>
+                        <td className="p-2.5 text-slate-400 font-mono text-[10px] truncate" title={[contact.email, contact.phone, contact.social].filter(Boolean).join(' | ')}>
+                          {[contact.email, contact.phone, contact.social].filter(Boolean).join(' | ') || '-'}
+                        </td>
+                        <td className="p-2.5">
+                          {contact.isNew ? (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-green-500/10 text-green-400 border border-green-500/25">
+                              New Contact
+                            </span>
+                          ) : (
+                            <span 
+                              className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/25 cursor-help"
+                              title={`Fields to enrich: ${contact.enrichedFields?.join(', ')}`}
+                            >
+                              Enrich ({contact.enrichedFields?.length})
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(false)}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  className="px-5 py-2 bg-primary hover:bg-secondary text-slate-900 rounded-xl text-xs font-bold shadow-lg shadow-primary/15 hover:shadow-primary/25 cursor-pointer"
+                >
+                  Import Selected ({importModalContacts.filter(c => c.selected).length})
+                </button>
+              </div>
+            </div>
           </motion.div>
         </div>
       )}
