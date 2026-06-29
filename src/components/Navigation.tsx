@@ -35,18 +35,35 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'users', user.uid, 'projects'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       const projs = snapshot.docs.map(doc => ({
         projectId: doc.id,
         ...doc.data()
       } as Project));
       setProjects(projs);
-      if (projs.length > 0 && !activeProjectId) {
-        setActiveProjectId(projs[0].projectId);
+
+      if (projs.length > 0) {
+        if (!activeProjectId || !projs.some(p => p.projectId === activeProjectId)) {
+          setActiveProjectId(projs[0].projectId);
+        }
+      } else {
+        // Auto-create a default project if the account has 0 projects
+        try {
+          const docRef = await addDoc(collection(db, 'users', user.uid, 'projects'), {
+            userId: user.uid,
+            name: "Default Project",
+            createdAt: serverTimestamp()
+          });
+          setActiveProjectId(docRef.id);
+        } catch (err) {
+          console.error("Failed to auto-create default project:", err);
+        }
       }
+    }, (error) => {
+      console.error("Firestore projects snapshot error:", error);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, activeProjectId]);
 
   const handleCreateProject = async () => {
     if (!user) return;
