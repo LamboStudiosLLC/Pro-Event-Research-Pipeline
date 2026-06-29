@@ -27,6 +27,8 @@ import {
   FileSpreadsheet,
   AlertCircle,
   X,
+  Lock,
+  ShieldAlert,
 } from 'lucide-react';
 import { Mode, ClaimedLead } from '@/src/types';
 import { isLeadMatch, normalizeDomain, normalizeName, isClaimExpired } from '@/src/lib/leadMatching';
@@ -346,21 +348,15 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           isSandbox: true
         }));
 
-        // Filter out claimed leads from sandbox results too
-        const activeClaimedLeadsSandbox = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
-        const availableSandbox = withSandbox.filter((r: BrowseResult) =>
-          !activeClaimedLeadsSandbox.some(cl => isLeadMatch(r, cl))
-        );
-
-        // Handle paging in mock simulation
+        // Include all results without filtering out claimed leads so users can see claimed state
         if (isNextPage) {
-          const pageMock = availableSandbox.map(item => ({
+          const pageMock = withSandbox.map(item => ({
             ...item,
             eventName: `${item.eventName} (Page ${nextPage})`
           }));
           setResults(prev => [...prev, ...pageMock]);
         } else {
-          setResults(availableSandbox);
+          setResults(withSandbox);
         }
       } catch (err: any) {
         setErrorMessage(err.message || "Simulation mode failure.");
@@ -399,14 +395,10 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
 
       const data = await response.json();
       if (data && data.results) {
-        const activeClaimedLeads = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
-        const available = data.results.filter((r: BrowseResult) =>
-          !activeClaimedLeads.some(cl => isLeadMatch(r, cl))
-        );
         if (isNextPage) {
-          setResults(prev => [...prev, ...available]);
+          setResults(prev => [...prev, ...data.results]);
         } else {
-          setResults(available);
+          setResults(data.results);
         }
       } else {
         throw new Error("Invalid results format returned from API.");
@@ -736,7 +728,10 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             <div className="space-y-3 shrink-0">
               {/* Date Ranges */}
               <div>
-                <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-1">Date Range</label>
+                <label className="text-[10px] uppercase tracking-wider text-slate-350 font-bold flex items-center gap-1.5 mb-1">
+                  <Calendar className="h-3.5 w-3.5 text-sky-300" />
+                  <span>Date Range</span>
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <span className="text-[8px] uppercase tracking-wider text-slate-500 block mb-0.5">Start</span>
@@ -1378,6 +1373,10 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
               <div className="grid gap-3 select-text">
                 {results.map((item, idx) => {
                   const isInCue = researchCue.some(c => c.eventName.toLowerCase() === item.eventName.toLowerCase());
+                  const activeClaimedLeads = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+                  const claimedLeadMatch = activeClaimedLeads.find(cl => isLeadMatch(item, cl));
+                  const isClaimedByOthers = !!claimedLeadMatch && !isInCue;
+
                   return (
                     <motion.div 
                       key={idx}
@@ -1386,21 +1385,34 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                       transition={{ delay: Math.min(idx * 0.05, 0.4) }}
                       className={cn(
                         "p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 select-text transition-all",
-                        isInCue 
-                          ? "bg-primary/5 border-primary/20 hover:border-primary/25" 
-                          : "bg-zinc-950/20 border-white/15 hover:border-white/20"
+                        isClaimedByOthers
+                          ? "bg-zinc-950/40 border-orange-500/30 opacity-65 italic"
+                          : isInCue 
+                            ? "bg-primary/5 border-primary/20 hover:border-primary/25" 
+                            : "bg-zinc-950/20 border-white/15 hover:border-white/20"
                       )}
                     >
                       <div className="space-y-1.5 flex-1 min-w-0 select-text">
                         <div className="flex items-center gap-2 flex-wrap select-text">
-                          <h3 className="font-bold text-sm text-white select-text truncate max-w-[300px] sm:max-w-md">{item.eventName}</h3>
+                          <h3 className={cn(
+                            "font-bold text-sm select-text truncate max-w-[300px] sm:max-w-md",
+                            isClaimedByOthers ? "text-slate-400 font-normal" : "text-white"
+                          )}>{item.eventName}</h3>
+                          
+                          {isClaimedByOthers && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-500/15 text-orange-400 border border-orange-500/30 not-italic">
+                              <ShieldAlert className="h-3 w-3 text-orange-400" />
+                              <span>Already Claimed {claimedLeadMatch?.claimedByName ? `(${claimedLeadMatch.claimedByName})` : ''}</span>
+                            </span>
+                          )}
+
                           {item.website && (
                             <a 
                               href={item.website.startsWith('http') ? item.website : `https://${item.website}`}
                               target="_blank" 
                               rel="noopener noreferrer"
                               referrerPolicy="no-referrer"
-                              className="text-primary hover:text-primary-dark transition-all flex items-center gap-0.5 text-[10px] font-mono select-none"
+                              className="text-primary hover:text-primary-dark transition-all flex items-center gap-0.5 text-[10px] font-mono select-none not-italic"
                               title={`Visit website for ${item.eventName}`}
                             >
                               <span>{item.website.replace(/^https?:\/\/(www\.)?/, '').substring(0, 24)}{item.website.length > 24 ? '...' : ''}</span>
@@ -1408,35 +1420,47 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                             </a>
                           )}
                         </div>
-                        <p className="text-xs text-slate-350 select-text leading-relaxed font-medium">
-                          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-0.5">Focus & Services</span>
+                        <p className={cn("text-xs select-text leading-relaxed font-medium", isClaimedByOthers ? "text-slate-400" : "text-slate-350")}>
+                          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block mb-0.5 not-italic">Focus & Services</span>
                           {item.servicesOffered}
                         </p>
                       </div>
 
                       <div className="shrink-0 flex items-center select-none">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleCue(item)}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border select-none w-full sm:w-auto justify-center",
-                            isInCue
-                              ? "bg-primary/10 hover:bg-red-500/15 border-primary/25 text-primary hover:text-red-400 hover:border-red-500/30"
-                              : "bg-white/5 hover:bg-white/10 border-white/10 hover:border-white/15 text-slate-300 hover:text-white"
-                          )}
-                        >
-                          {isInCue ? (
-                            <>
-                              <Check className="h-3.5 w-3.5 text-primary" />
-                              <span>Claimed</span>
-                            </>
-                          ) : (
-                            <>
-                              <Plus className="h-3.5 w-3.5 text-slate-400" />
-                              <span>Claim Lead</span>
-                            </>
-                          )}
-                        </button>
+                        {isClaimedByOthers ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border select-none w-full sm:w-auto justify-center bg-orange-500/10 border-orange-500/25 text-orange-400 opacity-80 cursor-not-allowed not-italic shadow-sm"
+                            title="This lead has already been claimed in the system and is unavailable."
+                          >
+                            <Lock className="h-3.5 w-3.5 text-orange-400" />
+                            <span>Claimed</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCue(item)}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border select-none w-full sm:w-auto justify-center",
+                              isInCue
+                                ? "bg-primary/10 hover:bg-red-500/15 border-primary/25 text-primary hover:text-red-400 hover:border-red-500/30"
+                                : "bg-white/5 hover:bg-white/10 border-white/10 hover:border-white/15 text-slate-300 hover:text-white"
+                            )}
+                          >
+                            {isInCue ? (
+                              <>
+                                <Check className="h-3.5 w-3.5 text-primary" />
+                                <span>Claimed</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="h-3.5 w-3.5 text-slate-400" />
+                                <span>Claim Lead</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                     </motion.div>
                   );
