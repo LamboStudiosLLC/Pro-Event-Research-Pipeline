@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Mode, Project } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db, logout } from '@/src/lib/firebase';
@@ -31,6 +31,24 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
   const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectOpen, setIsProjectOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  const projectRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (projectRef.current && !projectRef.current.contains(event.target as Node)) {
+        setIsProjectOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -175,7 +193,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
           </button>
         )}
 
-        <div className="relative h-full flex items-center">
+        <div ref={projectRef} className="relative h-full flex items-center">
           <button
             type="button"
             onClick={() => setIsProjectOpen(!isProjectOpen)}
@@ -193,7 +211,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="absolute top-full right-0 mt-3 w-56 glass p-2 rounded-xl shadow-2xl border border-white/10 z-50"
+                className="absolute top-full right-0 mt-3 w-56 bg-[#0e0f14] p-2 rounded-xl shadow-2xl border border-white/10 z-50"
               >
                 <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">
                   {projects.map(p => (
@@ -245,7 +263,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
           </AnimatePresence>
         </div>
 
-        <div className="relative h-full flex items-center">
+        <div ref={profileRef} className="relative h-full flex items-center">
           <button
             type="button"
             onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -264,7 +282,7 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 10 }}
-                className="absolute top-full right-0 mt-3 w-48 glass p-2 rounded-xl shadow-2xl border border-white/10 z-50"
+                className="absolute top-full right-0 mt-3 w-48 bg-[#0e0f14] p-2 rounded-xl shadow-2xl border border-white/10 z-50"
               >
                 <div className="px-3 py-2 text-[10px] text-slate-500 truncate mb-1">
                   {user?.email}
