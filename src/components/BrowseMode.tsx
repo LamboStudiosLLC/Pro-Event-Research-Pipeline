@@ -632,6 +632,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const handleManualAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualName.trim() || !user) return;
+
+    const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+    const matchingClaim = activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: manualName }, { eventName: cl.eventName, website: cl.website }));
+    if (matchingClaim) {
+      alert(`Cannot add lead: An event or vendor matching "${matchingClaim.eventName}" has already been claimed in the database.`);
+      return;
+    }
+
     setManualSubmitting(true);
 
     let targetProjectId = activeProjectId;
@@ -1258,53 +1266,72 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Name <span className="text-red-400">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Dreamforce 2026"
-                    value={manualName}
-                    onChange={e => setManualName(e.target.value)}
-                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
-                  />
-                </div>
+                {(() => {
+                  const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+                  const matchingManualClaim = manualName.trim().length >= 2
+                    ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: manualName }, { eventName: cl.eventName, website: cl.website }))
+                    : null;
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Website</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. https://www.dreamforce.com"
-                    value={manualWebsite}
-                    onChange={e => setManualWebsite(e.target.value)}
-                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
-                  />
-                </div>
+                  return (
+                    <>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Name <span className="text-red-400">*</span></label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Dreamforce 2026"
+                          value={manualName}
+                          onChange={e => setManualName(e.target.value)}
+                          className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                        />
+                        {matchingManualClaim && (
+                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
+                            <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                            <span>
+                              An item matching <strong>"{matchingManualClaim.eventName}"</strong> has already been claimed in the database.
+                            </span>
+                          </div>
+                        )}
+                      </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Description / Services</label>
-                  <textarea
-                    placeholder="Brief description, focus area, or services offered..."
-                    value={manualServices}
-                    onChange={e => setManualServices(e.target.value)}
-                    rows={3}
-                    className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium resize-none custom-scrollbar"
-                  />
-                </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Website</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://www.dreamforce.com"
+                          value={manualWebsite}
+                          onChange={e => setManualWebsite(e.target.value)}
+                          className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
+                        />
+                      </div>
 
-                <button
-                  type="submit"
-                  disabled={manualSubmitting || !manualName.trim()}
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary/80 to-primary text-black py-2.5 px-4 rounded-xl font-bold cursor-pointer hover:from-primary hover:to-primary/95 text-xs transition-all active:scale-98 disabled:opacity-50 disabled:pointer-events-none border border-primary/20"
-                >
-                  {manualSubmitting ? (
-                    <><RefreshCw className="h-3.5 w-3.5 animate-spin" /><span>Adding...</span></>
-                  ) : manualSuccess ? (
-                    <><Check className="h-3.5 w-3.5" /><span>Added to Research Cue!</span></>
-                  ) : (
-                    <><Plus className="h-3.5 w-3.5" /><span>Add to Research Cue</span></>
-                  )}
-                </button>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Description / Services</label>
+                        <textarea
+                          placeholder="Brief description, focus area, or services offered..."
+                          value={manualServices}
+                          onChange={e => setManualServices(e.target.value)}
+                          rows={3}
+                          className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium resize-none custom-scrollbar"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={manualSubmitting || !manualName.trim() || !!matchingManualClaim}
+                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary/80 to-primary text-black py-2.5 px-4 rounded-xl font-bold cursor-pointer hover:from-primary hover:to-primary/95 text-xs transition-all active:scale-98 disabled:opacity-50 disabled:pointer-events-none border border-primary/20"
+                      >
+                        {manualSubmitting ? (
+                          <><RefreshCw className="h-3.5 w-3.5 animate-spin" /><span>Adding...</span></>
+                        ) : manualSuccess ? (
+                          <><Check className="h-3.5 w-3.5" /><span>Added to Research Cue!</span></>
+                        ) : (
+                          <><Plus className="h-3.5 w-3.5" /><span>Add to Research Cue</span></>
+                        )}
+                      </button>
+                    </>
+                  );
+                })()}
               </form>
             </div>
           </div>

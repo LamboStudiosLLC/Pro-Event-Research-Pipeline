@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ResearchResult, SavedEvent, ActionNote, ResearchCueItem } from '@/src/types';
+import { ResearchResult, SavedEvent, ActionNote, ResearchCueItem, ClaimedLead } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
 import { collection, addDoc, serverTimestamp, setDoc, doc, query as fsQuery, onSnapshot, deleteDoc, getDocs, where, updateDoc } from 'firebase/firestore';
-import { normalizeName, normalizeDomain } from '@/src/lib/leadMatching';
+import { normalizeName, normalizeDomain, isLeadMatch, isClaimExpired } from '@/src/lib/leadMatching';
 import { 
   Search, 
   MapPin, 
@@ -35,7 +35,8 @@ import {
   AlertCircle,
   Edit3,
   Flame,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -347,6 +348,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
   const [projects, setProjects] = useState<any[]>([]);
   const [isTransferDropdownOpen, setIsTransferDropdownOpen] = useState(false);
+  const [claimedLeads, setClaimedLeads] = useState<ClaimedLead[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'claimed_leads'), snap => {
+      setClaimedLeads(snap.docs.map(d => ({ claimId: d.id, ...d.data() } as ClaimedLead)));
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -2024,6 +2033,17 @@ Pro Event Research Team`;
         return;
       }
 
+      const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+      const claimedInCsv = parsedNames.filter(name =>
+        activeClaimedLeadsList.some(cl => isLeadMatch({ eventName: name }, { eventName: cl.eventName, website: cl.website }))
+      );
+
+      if (claimedInCsv.length > 0) {
+        alert(`⚠️ CSV FILE CONTAINS ALREADY CLAIMED ITEMS!\n\nThe following ${claimedInCsv.length} event/vendor names in your CSV are already claimed in the database:\n\n${claimedInCsv.map(n => `• ${n}`).join('\n')}\n\nPlease revise your CSV file to remove these claimed items and re-upload.`);
+        e.target.value = '';
+        return;
+      }
+
       const currentFilled = multipleScanInputs.filter(item => item.trim() !== '');
       let newInputs: string[];
       if (currentFilled.length === 0) {
@@ -2053,6 +2073,15 @@ Pro Event Research Team`;
       return;
     }
 
+    const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+    const claimedMatchesInInput = eventNames.filter(name =>
+      activeClaimedLeadsList.some(cl => isLeadMatch({ eventName: name }, { eventName: cl.eventName, website: cl.website }))
+    );
+    if (claimedMatchesInInput.length > 0) {
+      alert(`Cannot submit batch scan: The following items are already claimed in the database:\n\n${claimedMatchesInInput.map(n => `• ${n}`).join('\n')}\n\nPlease remove or revise these claimed items before submitting.`);
+      return;
+    }
+
     if (!user || !activeProjectId) {
       alert("No active project or user context found.");
       return;
@@ -2065,7 +2094,7 @@ Pro Event Research Team`;
     setIsSaved(false);
     setIsMultipleModalOpen(false);
 
-    // 1. Add all items to the Cue in Firestore
+    // 1. Add all items to the Cue in Firestore and register claimed leads
     const addedCueItems: ResearchCueItem[] = [];
     try {
       for (const name of eventNames) {
@@ -2083,6 +2112,18 @@ Pro Event Research Team`;
           searchType: searchType,
           isSandbox: simulationMode,
           createdAt: null
+        });
+
+        await addDoc(collection(db, 'claimed_leads'), {
+          eventName: name,
+          website: '',
+          normalizedDomain: '',
+          normalizedName: normalizeName(name),
+          searchType: searchType,
+          claimedBy: user.uid,
+          claimedByName: user.displayName || user.email || '',
+          claimedAt: serverTimestamp(),
+          status: 'Initial',
         });
       }
     } catch (err) {
@@ -2589,40 +2630,11 @@ Pro Event Research Team`;
           <div className="relative flex-1">
             <input 
               type="text"
-              placeholder={searchType === 'event' ? "Search trade shows, conferences, or keywords..." : "Search event vendor, supplier, or company names..."}
+              readOnly
+              placeholder="Select an item from Cue, Scans, or Pipeline from the left column..."
               value={queryText}
-              onChange={(e) => setQueryText(e.target.value)}
-              className="w-full h-12 bg-zinc-900/50 glass border-white/10 rounded-xl px-12 pr-[125px] text-sm text-white focus:ring-1 focus:ring-primary outline-none placeholder:text-slate-600"
+              className="w-full h-12 bg-zinc-900/50 glass border-white/10 rounded-xl px-4 text-sm text-white focus:outline-none placeholder:text-slate-600 font-semibold cursor-default select-text"
             />
-            <Search className="h-5 w-5 absolute left-4 top-3.5 text-slate-500" />
-            
-            {/* Always visible stacked vertical buttons */}
-            <div className="absolute right-2 top-1.5 bottom-1.5 flex flex-col justify-between gap-1">
-              <button
-                type="button"
-                onClick={() => setSearchType('event')}
-                className={cn(
-                  "h-[18px] px-2 rounded-md text-[9px] font-extrabold uppercase tracking-wider transition-all cursor-pointer border flex items-center justify-center min-w-[96px]",
-                  searchType === 'event'
-                    ? "bg-slate-200 text-slate-900 border-white/80 active:scale-95 shadow-sm"
-                    : "bg-zinc-850 hover:bg-zinc-800 text-zinc-400 border-zinc-700/80 hover:text-zinc-300 active:scale-95"
-                )}
-              >
-                Search Event
-              </button>
-              <button
-                type="button"
-                onClick={() => setSearchType('vendor')}
-                className={cn(
-                  "h-[18px] px-2 rounded-md text-[9px] font-extrabold uppercase tracking-wider transition-all cursor-pointer border flex items-center justify-center min-w-[96px]",
-                  searchType === 'vendor'
-                    ? "bg-slate-200 text-slate-900 border-white/80 active:scale-95 shadow-sm"
-                    : "bg-zinc-850 hover:bg-zinc-800 text-zinc-400 border-zinc-700/80 hover:text-zinc-300 active:scale-95"
-                )}
-              >
-                Search Vendor
-              </button>
-            </div>
           </div>
 
 
@@ -3726,28 +3738,50 @@ Pro Event Research Team`;
               </p>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1 max-h-[350px]">
-                {multipleScanInputs.map((val, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <div className="text-[10px] font-mono text-slate-600 w-5 text-right">{idx + 1}.</div>
-                    <input
-                      type="text"
-                      placeholder={`e.g. CES 2026 or Event #${idx + 1}`}
-                      value={val}
-                      onChange={(e) => handleInputChange(idx, e.target.value)}
-                      className="flex-1 h-9 bg-zinc-900/50 border border-white/10 rounded-lg px-3 text-xs text-white focus:border-primary/50 focus:ring-1 focus:ring-primary/30 outline-none placeholder:text-slate-600"
-                    />
-                    {multipleScanInputs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveInputField(idx)}
-                        className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg border border-red-500/20 cursor-pointer"
-                        title="Remove event name"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {multipleScanInputs.map((val, idx) => {
+                  const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+                  const matchingClaim = val.trim().length >= 2
+                    ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: val }, { eventName: cl.eventName, website: cl.website }))
+                    : null;
+
+                  return (
+                    <div key={idx} className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-[10px] font-mono text-slate-600 w-5 text-right">{idx + 1}.</div>
+                        <input
+                          type="text"
+                          placeholder={`e.g. CES 2026 or Event #${idx + 1}`}
+                          value={val}
+                          onChange={(e) => handleInputChange(idx, e.target.value)}
+                          className={cn(
+                            "flex-1 h-9 bg-zinc-900/50 border rounded-lg px-3 text-xs text-white outline-none placeholder:text-slate-600 transition-colors",
+                            matchingClaim
+                              ? "border-orange-500/50 focus:border-orange-500"
+                              : "border-white/10 focus:border-primary/50 focus:ring-1 focus:ring-primary/30"
+                          )}
+                        />
+                        {multipleScanInputs.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInputField(idx)}
+                            className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg border border-red-500/20 cursor-pointer"
+                            title="Remove event name"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {matchingClaim && (
+                        <div className="ml-7 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
+                          <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                          <span>
+                            An event/vendor matching <strong>"{matchingClaim.eventName}"</strong> has already been claimed in the database.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="pt-3 flex items-center gap-3 pb-4 select-text">
