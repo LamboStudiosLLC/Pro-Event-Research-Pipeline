@@ -29,6 +29,7 @@ import {
   X,
   Lock,
   ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import { Mode, ClaimedLead } from '@/src/types';
 import { isLeadMatch, normalizeDomain, normalizeName, isClaimExpired } from '@/src/lib/leadMatching';
@@ -724,8 +725,17 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
           </div>
 
           {/* Form fields depending on choice */}
-          {searchType === 'event' ? (
-            <div className="space-y-3 shrink-0">
+          {(() => {
+            const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+            const liveMatchingEventClaim = (searchType === 'event' && eventName.trim().length >= 2)
+              ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName }, { eventName: cl.eventName, website: cl.website }))
+              : null;
+            const liveMatchingVendorClaim = (searchType === 'vendor' && vendorName.trim().length >= 2)
+              ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: vendorName }, { eventName: cl.eventName, website: cl.website }))
+              : null;
+
+            return searchType === 'event' ? (
+              <div className="space-y-3 shrink-0">
               {/* Date Ranges */}
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-slate-350 font-bold flex items-center gap-1.5 mb-1">
@@ -821,6 +831,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                     className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
                   />
                 </div>
+                {liveMatchingEventClaim && (
+                  <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
+                    <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                    <span>
+                      An event matching <strong>"{liveMatchingEventClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Event Type */}
@@ -856,6 +874,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                     className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
                   />
                 </div>
+                {liveMatchingVendorClaim && (
+                  <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
+                    <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                    <span>
+                      A vendor matching <strong>"{liveMatchingVendorClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Services Offered */}
@@ -873,7 +899,8 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                 </div>
               </div>
             </div>
-          )}
+          );
+        })()}
 
           {/* Location */}
           <div className="shrink-0">
