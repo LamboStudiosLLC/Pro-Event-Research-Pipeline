@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FirebaseProvider, useFirebase } from '@/src/components/FirebaseProvider';
+import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { Mode } from '@/src/types';
 import Navigation from '@/src/components/Navigation';
 import ResearchMode from '@/src/components/ResearchMode';
@@ -100,8 +101,10 @@ const AppContent = () => {
 
 export default function App() {
   return (
-    <FirebaseProvider>
-      <AppContent />
-    </FirebaseProvider>
+    <ErrorBoundary>
+      <FirebaseProvider>
+        <AppContent />
+      </FirebaseProvider>
+    </ErrorBoundary>
   );
 }
