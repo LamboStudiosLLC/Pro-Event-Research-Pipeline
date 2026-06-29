@@ -1,0 +1,5 @@
+{
+  "projects": {
+    "default": "druid-pro-event-pipeline"
+  }
+}
