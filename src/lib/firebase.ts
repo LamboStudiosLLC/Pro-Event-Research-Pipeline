@@ -1,9 +1,16 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import appletConfig from '@/firebase-applet-config.json';
 
 const env = (import.meta as any).env || {};
+
+// Optional local fallback config. This file is gitignored and absent in
+// production builds (e.g. Vercel), so it is loaded via import.meta.glob —
+// which resolves to an empty object when the file is missing instead of
+// failing the build. Production relies entirely on the VITE_FIREBASE_* env
+// vars below; the file only serves local development.
+const appletModules = import.meta.glob('../../firebase-applet-config.json', { eager: true }) as Record<string, { default: Record<string, string> }>;
+const appletConfig: Record<string, string> = Object.values(appletModules)[0]?.default ?? {};
 
 const firebaseConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY || appletConfig.apiKey,
