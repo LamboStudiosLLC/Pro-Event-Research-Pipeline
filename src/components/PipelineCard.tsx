@@ -360,11 +360,31 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     }
   }, [isExpanded]);
 
+  const extractMonth = (dateStr: string): string => {
+    if (!dateStr) return "upcoming month";
+    const months = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    for (const m of months) {
+      if (new RegExp(m, 'i').test(dateStr)) {
+        return m;
+      }
+    }
+    const d = new Date(dateStr + (dateStr.match(/^\d{4}-\d{2}-\d{2}$/) ? 'T00:00:00' : ''));
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'long' });
+    }
+    return dateStr;
+  };
+
   const applyReplacementsForContact = (tplText: string, contact: any) => {
     let text = tplText;
     const nameVal = event.eventName;
     const salespersonName = userDisplayName || "Sales Representative";
     const contactNameVal = contact?.name || "Team";
+    const locationVal = event.location || "your area";
+    const monthVal = extractMonth(event.date || "");
 
     // replace variables
     text = text.replace(/\[Event Name\]/gi, nameVal);
@@ -374,6 +394,8 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
     text = text.replace(/\[Salesperson\]/gi, salespersonName);
     text = text.replace(/\[Contact Name\]/gi, contactNameVal);
+    text = text.replace(/\[Location\]/gi, locationVal);
+    text = text.replace(/\[Month\]/gi, monthVal);
 
     return text;
   };
@@ -1149,7 +1171,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                       setEmailText(e.target.value);
                       setSelectedTemplateId(""); // clear selected if they edit
                     }}
-                    placeholder="Write or paste your email outreach draft here, or select a template from the dropdown menu to auto-fill placeholders like [Event Name] or [Vendor Name]..."
+                    placeholder="Write or paste your email outreach draft here, or select a template from the dropdown menu to auto-fill placeholders like [Event Name], [Contact Name], [Month], or [Location]..."
                     className="w-full flex-grow bg-black/50 border border-white/5 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary/40 h-full custom-scrollbar font-sans select-text leading-relaxed resize-none scrollbar-thin"
                   />
                 </div>
@@ -1157,9 +1179,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 {/* Footer with actions: Copy Text, New Email client */}
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-white/5 shrink-0">
                   <div className="text-[8px] text-slate-500 font-mono">
-                    Dynamic variables used:{" "}
+                    Placeholders supported:{" "}
                     <span className="text-primary font-bold">
-                      {event.eventName}
+                      [Event Name], [Contact Name], [Month], [Location], [Salesperson]
                     </span>
                   </div>
 
