@@ -20,42 +20,62 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Safety timer to prevent infinite loading screens if Firebase hangs in standard browser mode
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 3000);
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       if (user) {
-        const userRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userRef);
-        if (!userDoc.exists()) {
-          const newProfile: UserProfile = {
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userRef);
+          if (!userDoc.exists()) {
+            const newProfile: UserProfile = {
+              userId: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || user.email || '',
+              photoURL: user.photoURL || undefined,
+              role: 'salesperson',
+              createdAt: serverTimestamp(),
+            };
+            await setDoc(userRef, newProfile);
+            setProfile(newProfile);
+          } else {
+            const data = userDoc.data() as UserProfile;
+            // Backfill missing fields for existing users
+            const updates: Partial<UserProfile> = {};
+            if (!data.role) updates.role = 'salesperson';
+            if (!data.displayName) updates.displayName = user.displayName || user.email || '';
+            if (Object.keys(updates).length > 0) {
+              await setDoc(userRef, updates, { merge: true });
+              setProfile({ ...data, ...updates });
+            } else {
+              setProfile(data);
+            }
+          }
+        } catch (err) {
+          console.error("Firebase profile fetch error:", err);
+          setProfile({
             userId: user.uid,
             email: user.email || '',
             displayName: user.displayName || user.email || '',
             photoURL: user.photoURL || undefined,
             role: 'salesperson',
-            createdAt: serverTimestamp(),
-          };
-          await setDoc(userRef, newProfile);
-          setProfile(newProfile);
-        } else {
-          const data = userDoc.data() as UserProfile;
-          // Backfill missing fields for existing users
-          const updates: Partial<UserProfile> = {};
-          if (!data.role) updates.role = 'salesperson';
-          if (!data.displayName) updates.displayName = user.displayName || user.email || '';
-          if (Object.keys(updates).length > 0) {
-            await setDoc(userRef, updates, { merge: true });
-            setProfile({ ...data, ...updates });
-          } else {
-            setProfile(data);
-          }
+          });
         }
       } else {
         setProfile(null);
       }
       setLoading(false);
+      clearTimeout(timer);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
   return (
