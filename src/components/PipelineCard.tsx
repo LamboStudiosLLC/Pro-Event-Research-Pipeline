@@ -943,7 +943,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
           <button
             type="button"
-            onClick={() => deleteEvent(event.eventId)}
+            onClick={() => deleteEvent((event as any).docId || event.eventId)}
             className="p-1 px-1.5 bg-white/10 hover:bg-white/20 text-white rounded border border-white/20 hover:border-white/40 transition-all cursor-pointer flex items-center justify-center shadow-sm"
             title="Delete Event"
           >

@@ -1112,9 +1112,15 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     if (!confirmDelete) return;
 
     try {
-      const targetEvent = savedEvents.find(ev => ev.eventId === eventId);
-      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      const targetEvent = savedEvents.find(ev => ev.eventId === eventId || (ev as any).docId === eventId);
+      const docIdToDelete = (targetEvent as any)?.docId || eventId;
+      
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', docIdToDelete);
       await deleteDoc(eventRef);
+
+      if (eventId && eventId !== docIdToDelete) {
+        try { await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId)); } catch {}
+      }
 
       if (targetEvent) {
         // Return status to Available / Unclaimed in claimed_leads database
@@ -1133,7 +1139,7 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
         await saveToScans(targetEvent as any);
       }
 
-      if (result && ((result as any).eventId === eventId || result.eventName.toLowerCase() === targetEvent?.eventName.toLowerCase())) {
+      if (result && ((result as any).eventId === eventId || (result as any).docId === eventId || result.eventName.toLowerCase() === targetEvent?.eventName.toLowerCase())) {
         setIsSaved(false);
       }
     } catch (err) {
@@ -1191,8 +1197,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     const q = fsQuery(collection(db, 'users', user.uid, 'projects', activeProjectId, 'events'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({
+        ...doc.data(),
         eventId: doc.id,
-        ...doc.data()
+        docId: doc.id
       } as SavedEvent));
       // Sort A-Z by eventName
       list.sort((a, b) => a.eventName.localeCompare(b.eventName));
@@ -1210,8 +1217,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     const q = fsQuery(collection(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({
+        ...doc.data(),
         cueId: doc.id,
-        ...doc.data()
+        docId: doc.id
       } as ResearchCueItem));
       // Sort A-Z by eventName
       list.sort((a, b) => a.eventName.localeCompare(b.eventName));
@@ -1229,8 +1237,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     const q = fsQuery(collection(db, 'users', user.uid, 'projects', activeProjectId, 'scans'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({
+        ...doc.data(),
         scanId: doc.id,
-        ...doc.data()
+        docId: doc.id
       } as any));
       // Sort by createdAt descending (most recent first)
       list.sort((a, b) => {

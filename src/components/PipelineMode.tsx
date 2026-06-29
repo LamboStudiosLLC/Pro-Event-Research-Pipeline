@@ -305,8 +305,9 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     const q = query(collection(db, 'users', user.uid, 'projects', activeProjectId, 'events'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const evs = snapshot.docs.map(doc => ({ 
+        ...doc.data(),
         eventId: doc.id, 
-        ...doc.data() 
+        docId: doc.id
       } as SavedEvent));
       setEvents(evs);
     });
@@ -418,9 +419,11 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
   const deleteEvent = async (eventId: string) => {
     if (!user || !activeProjectId) return;
-    const target = events.find(e => e.eventId === eventId);
+    const target = events.find(e => e.eventId === eventId || (e as any).docId === eventId || (e as any).id === eventId);
     if (target) {
       setDeleteModalEvent(target);
+    } else {
+      setDeleteModalEvent({ eventId, eventName: 'Selected Lead' } as any);
     }
   };
 
@@ -430,8 +433,11 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
     setDeleteModalEvent(null);
 
     try {
-      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', event.eventId);
-      await deleteDoc(eventRef);
+      const docId1 = (event as any).docId || event.eventId;
+      await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', docId1));
+      if (event.eventId && event.eventId !== docId1) {
+        try { await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', event.eventId)); } catch {}
+      }
 
       const claimSnap = await getDocs(query(
         collection(db, 'claimed_leads'),
