@@ -1107,13 +1107,32 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const handleDeleteSavedEvent = async (eventId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user || !activeProjectId) return;
+
+    const confirmDelete = window.confirm("Are you sure? Scan $Tokens used curating this lead.");
+    if (!confirmDelete) return;
+
     try {
       const targetEvent = savedEvents.find(ev => ev.eventId === eventId);
       const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
       await deleteDoc(eventRef);
+
       if (targetEvent) {
+        // Return status to Available / Unclaimed in claimed_leads database
+        const claimSnap = await getDocs(fsQuery(
+          collection(db, 'claimed_leads'),
+          where('claimedBy', '==', user.uid)
+        ));
+        const matches = claimSnap.docs.filter(d =>
+          isLeadMatch(
+            { eventName: targetEvent.eventName, website: targetEvent.website },
+            { eventName: d.data().eventName, website: d.data().website }
+          )
+        );
+        await Promise.all(matches.map(d => deleteDoc(d.ref)));
+
         await saveToScans(targetEvent as any);
       }
+
       if (result && ((result as any).eventId === eventId || result.eventName.toLowerCase() === targetEvent?.eventName.toLowerCase())) {
         setIsSaved(false);
       }

@@ -633,7 +633,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
     e.preventDefault();
     if (!manualName.trim() || !user) return;
 
-    const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+    const activeClaimedLeadsList = claimedLeads.filter(cl => cl.status === 'Retired' || !isClaimExpired(cl.claimedAt));
     const matchingClaim = activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: manualName }, { eventName: cl.eventName, website: cl.website }));
     if (matchingClaim) {
       alert(`Cannot add lead: An event or vendor matching "${matchingClaim.eventName}" has already been claimed in the database.`);
@@ -734,7 +734,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
 
           {/* Form fields depending on choice */}
           {(() => {
-            const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+            const activeClaimedLeadsList = claimedLeads.filter(cl => cl.status === 'Retired' || !isClaimExpired(cl.claimedAt));
             const liveMatchingEventClaim = (searchType === 'event' && eventName.trim().length >= 2)
               ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName }, { eventName: cl.eventName, website: cl.website }))
               : null;
@@ -840,10 +840,19 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                   />
                 </div>
                 {liveMatchingEventClaim && (
-                  <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
-                    <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                  <div className={cn(
+                    "mt-1.5 flex items-start gap-1.5 text-[11px] font-medium p-2 rounded-lg border shadow-sm",
+                    liveMatchingEventClaim.status === 'Retired'
+                      ? "text-red-400 bg-red-500/10 border-red-500/25"
+                      : "text-orange-400 bg-orange-500/10 border-orange-500/25"
+                  )}>
+                    <AlertTriangle className={cn("h-4 w-4 shrink-0 mt-0.5", liveMatchingEventClaim.status === 'Retired' ? "text-red-400" : "text-orange-400")} />
                     <span>
-                      An event matching <strong>"{liveMatchingEventClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.
+                      {liveMatchingEventClaim.status === 'Retired' ? (
+                        <>An event matching <strong>"{liveMatchingEventClaim.eventName}"</strong> is marked as <strong>Retired/Closed</strong> in the database and can no longer be scanned or contacted.</>
+                      ) : (
+                        <>An event matching <strong>"{liveMatchingEventClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.</>
+                      )}
                     </span>
                   </div>
                 )}
@@ -883,10 +892,19 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                   />
                 </div>
                 {liveMatchingVendorClaim && (
-                  <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
-                    <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                  <div className={cn(
+                    "mt-1.5 flex items-start gap-1.5 text-[11px] font-medium p-2 rounded-lg border shadow-sm",
+                    liveMatchingVendorClaim.status === 'Retired'
+                      ? "text-red-400 bg-red-500/10 border-red-500/25"
+                      : "text-orange-400 bg-orange-500/10 border-orange-500/25"
+                  )}>
+                    <AlertTriangle className={cn("h-4 w-4 shrink-0 mt-0.5", liveMatchingVendorClaim.status === 'Retired' ? "text-red-400" : "text-orange-400")} />
                     <span>
-                      A vendor matching <strong>"{liveMatchingVendorClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.
+                      {liveMatchingVendorClaim.status === 'Retired' ? (
+                        <>A vendor matching <strong>"{liveMatchingVendorClaim.eventName}"</strong> is marked as <strong>Retired/Closed</strong> in the database and can no longer be scanned or contacted.</>
+                      ) : (
+                        <>A vendor matching <strong>"{liveMatchingVendorClaim.eventName}"</strong> is already claimed in the database. Consider revising your search to find available leads.</>
+                      )}
                     </span>
                   </div>
                 )}
@@ -1267,7 +1285,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                 </div>
 
                 {(() => {
-                  const activeClaimedLeadsList = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+                  const activeClaimedLeadsList = claimedLeads.filter(cl => cl.status === 'Retired' || !isClaimExpired(cl.claimedAt));
                   const matchingManualClaim = manualName.trim().length >= 2
                     ? activeClaimedLeadsList.find(cl => isLeadMatch({ eventName: manualName }, { eventName: cl.eventName, website: cl.website }))
                     : null;
@@ -1285,10 +1303,19 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                           className="w-full bg-zinc-900/50 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-primary/50 text-white font-medium"
                         />
                         {matchingManualClaim && (
-                          <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-orange-400 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/25 shadow-sm">
-                            <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                          <div className={cn(
+                            "mt-1.5 flex items-start gap-1.5 text-[11px] font-medium p-2 rounded-lg border shadow-sm",
+                            matchingManualClaim.status === 'Retired'
+                              ? "text-red-400 bg-red-500/10 border-red-500/25"
+                              : "text-orange-400 bg-orange-500/10 border-orange-500/25"
+                          )}>
+                            <AlertTriangle className={cn("h-4 w-4 shrink-0 mt-0.5", matchingManualClaim.status === 'Retired' ? "text-red-400" : "text-orange-400")} />
                             <span>
-                              An item matching <strong>"{matchingManualClaim.eventName}"</strong> has already been claimed in the database.
+                              {matchingManualClaim.status === 'Retired' ? (
+                                <>An item matching <strong>"{matchingManualClaim.eventName}"</strong> is marked as Retired/Closed in the database.</>
+                              ) : (
+                                <>An item matching <strong>"{matchingManualClaim.eventName}"</strong> has already been claimed in the database.</>
+                              )}
                             </span>
                           </div>
                         )}
@@ -1427,9 +1454,10 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
               <div className="grid gap-3 select-text">
                 {results.map((item, idx) => {
                   const isInCue = researchCue.some(c => c.eventName.toLowerCase() === item.eventName.toLowerCase());
-                  const activeClaimedLeads = claimedLeads.filter(cl => !isClaimExpired(cl.claimedAt));
+                  const activeClaimedLeads = claimedLeads.filter(cl => cl.status === 'Retired' || !isClaimExpired(cl.claimedAt));
                   const claimedLeadMatch = activeClaimedLeads.find(cl => isLeadMatch(item, cl));
                   const isClaimedByOthers = !!claimedLeadMatch && !isInCue;
+                  const isRetired = claimedLeadMatch?.status === 'Retired';
 
                   return (
                     <motion.div 
@@ -1439,11 +1467,13 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                       transition={{ delay: Math.min(idx * 0.05, 0.4) }}
                       className={cn(
                         "p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 select-text transition-all",
-                        isClaimedByOthers
-                          ? "bg-zinc-950/40 border-orange-500/30 opacity-65 italic"
-                          : isInCue 
-                            ? "bg-primary/5 border-primary/20 hover:border-primary/25" 
-                            : "bg-zinc-950/20 border-white/15 hover:border-white/20"
+                        isRetired
+                          ? "bg-red-950/20 border-red-500/30 opacity-65 italic"
+                          : isClaimedByOthers
+                            ? "bg-zinc-950/40 border-orange-500/30 opacity-65 italic"
+                            : isInCue 
+                              ? "bg-primary/5 border-primary/20 hover:border-primary/25" 
+                              : "bg-zinc-950/20 border-white/15 hover:border-white/20"
                       )}
                     >
                       <div className="space-y-1.5 flex-1 min-w-0 select-text">
@@ -1454,9 +1484,14 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                           )}>{item.eventName}</h3>
                           
                           {isClaimedByOthers && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-500/15 text-orange-400 border border-orange-500/30 not-italic">
-                              <ShieldAlert className="h-3 w-3 text-orange-400" />
-                              <span>Already Claimed {claimedLeadMatch?.claimedByName ? `(${claimedLeadMatch.claimedByName})` : ''}</span>
+                            <span className={cn(
+                              "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border not-italic",
+                              isRetired
+                                ? "bg-red-500/15 text-red-400 border-red-500/30"
+                                : "bg-orange-500/15 text-orange-400 border-orange-500/30"
+                            )}>
+                              <ShieldAlert className={cn("h-3 w-3", isRetired ? "text-red-400" : "text-orange-400")} />
+                              <span>{isRetired ? "Retired / Closed Lead" : `Already Claimed ${claimedLeadMatch?.claimedByName ? `(${claimedLeadMatch.claimedByName})` : ''}`}</span>
                             </span>
                           )}
 
@@ -1485,11 +1520,16 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                           <button
                             type="button"
                             disabled
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border select-none w-full sm:w-auto justify-center bg-orange-500/10 border-orange-500/25 text-orange-400 opacity-80 cursor-not-allowed not-italic shadow-sm"
-                            title="This lead has already been claimed in the system and is unavailable."
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border select-none w-full sm:w-auto justify-center opacity-80 cursor-not-allowed not-italic shadow-sm",
+                              isRetired
+                                ? "bg-red-500/10 border-red-500/25 text-red-400"
+                                : "bg-orange-500/10 border-orange-500/25 text-orange-400"
+                            )}
+                            title={isRetired ? "This lead has been marked as Retired/Closed." : "This lead has already been claimed in the system and is unavailable."}
                           >
-                            <Lock className="h-3.5 w-3.5 text-orange-400" />
-                            <span>Claimed</span>
+                            <Lock className={cn("h-3.5 w-3.5", isRetired ? "text-red-400" : "text-orange-400")} />
+                            <span>{isRetired ? "Retired" : "Claimed"}</span>
                           </button>
                         ) : (
                           <button

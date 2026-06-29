@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { SavedEvent, ResponseOutcome } from '@/src/types';
 import { useFirebase } from './FirebaseProvider';
 import { db } from '@/src/lib/firebase';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
-import { isLeadMatch } from '@/src/lib/leadMatching';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { isLeadMatch, normalizeName, normalizeDomain } from '@/src/lib/leadMatching';
 import { 
   ChevronRight,
   MoreHorizontal,
@@ -25,6 +25,8 @@ import {
   Pencil,
   Check,
   X,
+  RotateCcw,
+  Archive,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -45,6 +47,7 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
   const [events, setEvents] = useState<SavedEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('');
+  const [deleteModalEvent, setDeleteModalEvent] = useState<SavedEvent | null>(null);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
@@ -415,16 +418,53 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
 
   const deleteEvent = async (eventId: string) => {
     if (!user || !activeProjectId) return;
-    const confirmDelete = window.confirm(
-      "Warning: This delete action is permanent!\n\nIf you wish to take this listing out of the pipeline and return it to the Scans list, you must delete/un-save it from the Research > List Editor > Pipeline instead.\n\nAre you sure you want to permanently delete this listing?"
-    );
-    if (!confirmDelete) return;
+    const target = events.find(e => e.eventId === eventId);
+    if (target) {
+      setDeleteModalEvent(target);
+    }
+  };
+
+  const handleExecuteDelete = async (action: 'unclaim' | 'retire') => {
+    if (!user || !activeProjectId || !deleteModalEvent) return;
+    const event = deleteModalEvent;
+    setDeleteModalEvent(null);
 
     try {
-      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId);
+      const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', event.eventId);
       await deleteDoc(eventRef);
+
+      const claimSnap = await getDocs(query(
+        collection(db, 'claimed_leads'),
+        where('claimedBy', '==', user.uid)
+      ));
+      const matches = claimSnap.docs.filter(d =>
+        isLeadMatch(
+          { eventName: event.eventName, website: event.website },
+          { eventName: d.data().eventName, website: d.data().website }
+        )
+      );
+
+      if (action === 'unclaim') {
+        await Promise.all(matches.map(d => deleteDoc(d.ref)));
+      } else if (action === 'retire') {
+        if (matches.length > 0) {
+          await Promise.all(matches.map(d => updateDoc(d.ref, { status: 'Retired' })));
+        } else {
+          await addDoc(collection(db, 'claimed_leads'), {
+            eventName: event.eventName,
+            website: event.website || '',
+            normalizedDomain: normalizeDomain(event.website || ''),
+            normalizedName: normalizeName(event.eventName),
+            searchType: event.searchType || 'event',
+            claimedBy: user.uid,
+            claimedByName: user.displayName || user.email || '',
+            claimedAt: serverTimestamp(),
+            status: 'Retired'
+          });
+        }
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to execute delete action:', e);
     }
   };
 
@@ -687,6 +727,62 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
           )}
         </AnimatePresence>
       </div>
+
+      {deleteModalEvent && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm select-text">
+          <div className="bg-[#0e0f14] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2 text-red-400 font-bold text-sm uppercase tracking-wider">
+                <Trash2 className="h-5 w-5" />
+                <span>Remove From Pipeline</span>
+              </div>
+              <button onClick={() => setDeleteModalEvent(null)} className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed font-medium">
+              Choose how you want to remove <strong className="text-white">"{deleteModalEvent.eventName}"</strong> from your pipeline:
+            </p>
+
+            <div className="space-y-3 pt-1">
+              <button
+                type="button"
+                onClick={() => handleExecuteDelete('unclaim')}
+                className="w-full text-left p-3.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-white/10 hover:border-sky-500/40 transition-all flex items-start gap-3 cursor-pointer group"
+              >
+                <RotateCcw className="h-5 w-5 text-sky-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-white group-hover:text-sky-300">Remove from my pipeline, and Reset Claim Status</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 leading-normal">Unclaims this lead and makes it available again in Get Leads search results for all users.</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteDelete('retire')}
+                className="w-full text-left p-3.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-white/10 hover:border-amber-500/40 transition-all flex items-start gap-3 cursor-pointer group"
+              >
+                <Archive className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-white group-hover:text-amber-300">Remove from my pipeline & Mark as Retired</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 leading-normal">Marks this lead as Retired/Closed in the database so team members no longer contact or scan it.</div>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDeleteModalEvent(null)}
+                className="px-4 py-2 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
