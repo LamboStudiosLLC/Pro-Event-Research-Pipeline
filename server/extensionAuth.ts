@@ -19,7 +19,8 @@ export async function resolveExtensionAuth(
   const key = req.header("x-extension-key");
   if (!key) return null;
 
-  const snap = await getAdminDb().collection("extension_keys").doc(key).get();
+  const db = await getAdminDb();
+  const snap = await db.collection("extension_keys").doc(key).get();
   if (!snap.exists) return null;
 
   const data = snap.data() ?? {};

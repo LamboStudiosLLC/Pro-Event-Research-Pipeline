@@ -19,7 +19,7 @@ import { getAdminDb } from "../server/firebaseAdmin";
 dotenv.config();
 
 async function listUsers() {
-  const db = getAdminDb();
+  const db = await getAdminDb();
   const users = await db.collection("users").get();
   if (users.empty) {
     console.log("No users found in the `users` collection.");
@@ -41,7 +41,7 @@ async function listUsers() {
 }
 
 async function mintKey(uid: string, projectId: string) {
-  const db = getAdminDb();
+  const db = await getAdminDb();
   const key = `ext_${randomBytes(24).toString("hex")}`;
   await db.collection("extension_keys").doc(key).set({
     uid,
