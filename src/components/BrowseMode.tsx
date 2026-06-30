@@ -30,6 +30,7 @@ import {
   Lock,
   ShieldAlert,
   AlertTriangle,
+  ChevronDown,
 } from 'lucide-react';
 import { Mode, ClaimedLead } from '@/src/types';
 import { isLeadMatch, normalizeDomain, normalizeName, isClaimExpired } from '@/src/lib/leadMatching';
@@ -257,6 +258,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'preview' | 'importing' | 'done'>('idle');
   const [importProgress, setImportProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [showFormatGuide, setShowFormatGuide] = useState(false);
 
   const minPct = (minAttendance - 10) / (150000 - 10);
   const maxPct = (maxAttendance - 10) / (150000 - 10);
@@ -1085,37 +1087,80 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             {/* Import workflow */}
             <div className="flex-1 flex flex-col overflow-hidden">
             {importStatus === 'idle' && (
-              <div
-                onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={e => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                  const file = e.dataTransfer.files[0];
-                  if (file) parseImportFile(file);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-                className={cn(
-                  "flex flex-col items-center justify-center gap-4 border-2 border-dashed rounded-2xl p-16 cursor-pointer transition-all",
-                  isDragging
-                    ? "border-primary/60 bg-primary/5"
-                    : "border-white/10 hover:border-white/20 hover:bg-white/[0.02]"
-                )}
-              >
-                <div className="p-4 bg-white/5 rounded-full border border-white/10">
-                  <FileSpreadsheet className="h-8 w-8 text-slate-400" />
+              <div className="flex flex-col gap-3">
+                <div
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const file = e.dataTransfer.files[0];
+                    if (file) parseImportFile(file);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    "flex flex-col items-center justify-center gap-4 border-2 border-dashed rounded-2xl p-16 cursor-pointer transition-all",
+                    isDragging
+                      ? "border-primary/60 bg-primary/5"
+                      : "border-white/10 hover:border-white/20 hover:bg-white/[0.02]"
+                  )}
+                >
+                  <div className="p-4 bg-white/5 rounded-full border border-white/10">
+                    <FileSpreadsheet className="h-8 w-8 text-slate-400" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-white">Drop your file here</p>
+                    <p className="text-xs text-slate-500 mt-1">or click to browse — .xlsx or .csv</p>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) parseImportFile(f); }}
+                  />
                 </div>
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-white">Drop your file here</p>
-                  <p className="text-xs text-slate-500 mt-1">or click to browse — .xlsx or .csv</p>
+
+                {/* CSV Format Guide */}
+                <div className="border border-white/5 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setShowFormatGuide(v => !v)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-400 hover:text-white hover:bg-white/[0.03] transition-all cursor-pointer"
+                  >
+                    <span className="font-semibold uppercase tracking-wider text-[10px]">CSV / XLSX Format Guide</span>
+                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showFormatGuide && "rotate-180")} />
+                  </button>
+                  {showFormatGuide && (
+                    <div className="px-4 pb-4 pt-1 space-y-3 text-xs text-slate-400">
+                      <p>The first row must be a header row. Column names are flexible — the importer recognises common variations. Required columns are marked <span className="text-white font-semibold">bold</span>.</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Event</p>
+                          <ul className="space-y-1">
+                            <li><span className="text-white font-semibold">Event Name</span> — or <span className="font-mono bg-white/5 px-1 rounded">Name</span>, <span className="font-mono bg-white/5 px-1 rounded">Title</span>, <span className="font-mono bg-white/5 px-1 rounded">Event</span></li>
+                            <li><span className="text-slate-300">Event Website</span> — or <span className="font-mono bg-white/5 px-1 rounded">Website</span>, <span className="font-mono bg-white/5 px-1 rounded">URL</span></li>
+                            <li><span className="text-slate-300">Start Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted Start Date</span>, <span className="font-mono bg-white/5 px-1 rounded">Date</span></li>
+                            <li><span className="text-slate-300">End Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted End Date</span></li>
+                            <li><span className="text-slate-300">City</span> — or <span className="font-mono bg-white/5 px-1 rounded">Location</span></li>
+                            <li><span className="text-slate-300">Country</span></li>
+                            <li><span className="text-slate-300">Event Categories</span> — or <span className="font-mono bg-white/5 px-1 rounded">Categories</span>, <span className="font-mono bg-white/5 px-1 rounded">Sector</span></li>
+                            <li><span className="text-slate-300">Event Type</span> — or <span className="font-mono bg-white/5 px-1 rounded">Type</span></li>
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Contact (optional)</p>
+                          <ul className="space-y-1">
+                            <li><span className="text-slate-300">Contact Person Name</span> — or <span className="font-mono bg-white/5 px-1 rounded">Contact Name</span></li>
+                            <li><span className="text-slate-300">Contact Person Email</span> — or <span className="font-mono bg-white/5 px-1 rounded">Contact Email</span>, <span className="font-mono bg-white/5 px-1 rounded">Email</span></li>
+                            <li><span className="text-slate-300">Contact Person Designation</span> — or <span className="font-mono bg-white/5 px-1 rounded">Designation</span>, <span className="font-mono bg-white/5 px-1 rounded">Role</span></li>
+                          </ul>
+                        </div>
+                      </div>
+                      <p className="text-slate-500">Only <span className="text-white font-semibold">Event Name</span> is required. All other columns are optional — rows missing a name are skipped.</p>
+                    </div>
+                  )}
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) parseImportFile(f); }}
-                />
               </div>
             )}
 
