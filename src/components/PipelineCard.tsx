@@ -138,7 +138,18 @@ const generateLocalVariationsClient = (text: string): string[] => {
         " Hope to speak details soon.",
         " Cheers.",
       ];
-      const selectedSuffix = suffixes[i % suffixes.length];
+      
+      const cleanCurrent = current.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const availableSuffixes = suffixes.filter((s) => {
+        const cleanS = s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+        return !cleanCurrent.includes(cleanS);
+      });
+
+      const selectedSuffix =
+        availableSuffixes.length > 0
+          ? availableSuffixes[i % availableSuffixes.length]
+          : " Best regards.";
+
       const lines = current.split("\n");
       if (lines.length > 2) {
         lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
@@ -386,12 +397,31 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     return dateStr;
   };
 
+  const extractCity = (loc: string): string => {
+    if (!loc) return "your area";
+    const trimmed = loc.trim();
+    if (!trimmed) return "your area";
+    const parts = trimmed.split(',').map(p => p.trim());
+    if (parts.length === 1) {
+      return parts[0];
+    }
+    const countries = ['usa', 'us', 'united states', 'united kingdom', 'uk', 'canada', 'germany', 'france', 'spain', 'italy'];
+    let lastIndex = parts.length - 1;
+    if (countries.includes(parts[lastIndex].toLowerCase())) {
+      lastIndex--;
+    }
+    if (lastIndex > 0) {
+      return parts[lastIndex - 1];
+    }
+    return parts[0];
+  };
+
   const applyReplacementsForContact = (tplText: string, contact: any) => {
     let text = tplText;
     const nameVal = event.eventName;
     const salespersonName = userDisplayName || "Sales Representative";
     const contactNameVal = contact?.name || "Team";
-    const locationVal = event.location || "your area";
+    const locationVal = extractCity(event.location || "your area");
     const monthVal = extractMonth(event.date || "");
 
     // replace variables
@@ -1029,7 +1059,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                   </div>
 
                   {/* Template actions */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 ml-auto shrink-0">
                     {/* Custom Dropdown menu with red delete "X" */}
                     <div className="relative">
                       <button

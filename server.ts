@@ -340,7 +340,17 @@ function generateLocalVariations(text: string): string[] {
         " Hope to speak details soon.",
         " Cheers."
       ];
-      const selectedSuffix = suffixes[i % suffixes.length];
+      
+      const cleanCurrent = current.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const availableSuffixes = suffixes.filter(s => {
+        const cleanS = s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+        return !cleanCurrent.includes(cleanS);
+      });
+
+      const selectedSuffix = availableSuffixes.length > 0 
+        ? availableSuffixes[i % availableSuffixes.length] 
+        : " Best regards.";
+
       const lines = current.split('\n');
       if (lines.length > 2) {
         lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
@@ -350,9 +360,28 @@ function generateLocalVariations(text: string): string[] {
       }
     }
 
-    variations.push(current);
+    variations.push(cleanSentenceDuplications(current));
   }
   return variations;
+}
+
+function cleanSentenceDuplications(variationText: string): string {
+  const paragraphs = variationText.split('\n');
+  const cleanedParagraphs = paragraphs.map(p => {
+    const sentences = p.split(/(?<=[.!?])\s+/);
+    const seen = new Set<string>();
+    const uniqueSentences = sentences.filter(s => {
+      const cleanS = s.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!cleanS) return true;
+      if (seen.has(cleanS)) {
+        return false;
+      }
+      seen.add(cleanS);
+      return true;
+    });
+    return uniqueSentences.join(" ");
+  });
+  return cleanedParagraphs.join('\n');
 }
 
 // Generate 20 variations of email with slight copywriting deviations using LLM
@@ -369,9 +398,10 @@ Take the following email outreach template:
 
 Please generate exactly 20 slightly deviated variations of this email template. 
 Each variation must:
-1. Preserve all bracketed placeholders completely unchanged (like [Contact Name], [Vendor Name], [Event Name], [Event], [Vendor], [Salesperson]) because they are replaced at runtime.
+1. Preserve all bracketed placeholders completely unchanged (like [Contact Name], [Vendor Name], [Event Name], [Event], [Vendor], [Salesperson], [Location], [Month]) because they are replaced at runtime.
 2. Have minor differences in tone, sentence order, vocabulary, or spacing, but keep the core message and CTA the same.
 3. Be fully natural and professional.
+4. CRITICAL: Avoid duplicate phrases or repeating sentences within any single variation (for example, do not repeat "I appreciate your time" or similar sentences twice in the same email).
 
 Return exactly 20 distinct variations inside a JSON array under the key "variations".`;
 
@@ -396,7 +426,7 @@ Return exactly 20 distinct variations inside a JSON array under the key "variati
 
     const result = JSON.parse(response.text);
     if (result.variations && Array.isArray(result.variations)) {
-      let vars = result.variations;
+      let vars = result.variations.map((v: string) => cleanSentenceDuplications(v));
       while (vars.length < 20) {
         vars.push(...generateLocalVariations(text).slice(0, 20 - vars.length));
       }
