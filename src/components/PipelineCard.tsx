@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion } from "motion/react";
+import { useFirebase } from "./FirebaseProvider";
+import { useTemplates, EmailTemplate } from "@/src/lib/useTemplates";
 
 const formatDate = (raw: string): string => {
   if (!raw) return '';
@@ -42,14 +44,6 @@ const formatDate = (raw: string): string => {
   if (isNaN(d.getTime())) return raw;
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 };
-
-interface EmailTemplate {
-  id: string;
-  name: string;
-  text: string;
-  variations?: string[];
-  currentIndex?: number;
-}
 
 const generateLocalVariationsClient = (text: string): string[] => {
   const greetings = [
@@ -162,25 +156,6 @@ const generateLocalVariationsClient = (text: string): string[] => {
   }
   return variations;
 };
-
-const DEFAULT_TEMPLATES: EmailTemplate[] = [
-  {
-    id: "druid_intro",
-    name: "Druid Event Introduction",
-    text: `Hello!
-
-My name is Chris, I'm the owner of Druid Productions. A colleague informed me of your upcoming event in [Month] and encouraged me to reach out as we work with many similar companies and events. Hopefully I have the correct contact, this is my first time attempting to introduce our company to yours. Please let me know if this ended up in the right place!
-
-Druid Productions is 100% dedicated to event video and photography coverage, providing a wide range of services for major events across the US. Specializing in coverage for corporate events, summits, expos, trade shows and conferences, our work includes many of the premier events and brands in the US. Druid has developed a reputation as a reliable high quality vendor in the event space.
-
-We are a national company, fulfilling ongoing services for our clients year after year in all 50 states. A significant portion of the work we do is in the [Location] area.
-You may already have someone lined up to assist with your event, but in case you still need help, I wanted to introduce myself and start a conversation. Druid has some unique offerings that can complement your existing production, or we can step in as a turnkey solution for any event size or production level.
-
-My teams use the most modern equipment and we provide a premium service at an excellent price. All my staff are veterans in the event industry and we show up with total professionalism. Should your project require editing services, our team of editors is standing by and we include a robust review process with every video we deliver.
- I appreciate your time.
-Please check us out and see what our clients have to say. If you are impressed with what you see, let me know if you would like to discuss the possibilities of working together on your upcoming initiatives. We come highly rated and won't stop until you're 100% satisfied.`,
-  },
-];
 
 interface PipelineCardProps {
   event: SavedEvent;
@@ -331,9 +306,15 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [emailText, setEmailText] = useState("");
   const [copiedDraft, setCopiedDraft] = useState(false);
-  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const { user, profile } = useFirebase();
+  const isAdmin = profile?.role === 'admin';
+  const { templates, createTemplate, deleteTemplate, canDelete } = useTemplates(user?.uid, isAdmin);
+  // Per-session cache of generated copy variations + rotation index, keyed by
+  // template id. Kept out of Firestore since it's ephemeral, per-browser state.
+  const [variationsCache, setVariationsCache] = useState<Record<string, { variations: string[]; index: number }>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [isSavingTemplateMode, setIsSavingTemplateMode] = useState(false);
+  const [shareWithAll, setShareWithAll] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isContactSelectorOpen, setIsContactSelectorOpen] = useState(false);
@@ -342,42 +323,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [preferredMailClient, setPreferredMailClient] = useState<string | null>(() => localStorage.getItem("preferred_mail_client"));
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
 
-  const handleDeleteTemplate = (id: string) => {
-    const updated = templates.filter((t) => t.id !== id);
-    setTemplates(updated);
-    localStorage.setItem("email_templates", JSON.stringify(updated));
-    if (selectedTemplateId === id) {
+  const handleDeleteTemplate = (tpl: EmailTemplate) => {
+    deleteTemplate(tpl);
+    if (selectedTemplateId === tpl.id) {
       setSelectedTemplateId("");
       setEmailText("");
     }
   };
-
-  // Load templates from localStorage on mount & when card is expanded
-  useEffect(() => {
-    if (isExpanded) {
-      const stored = localStorage.getItem("email_templates");
-      let currentTemplates: EmailTemplate[] = [];
-      if (stored) {
-        try {
-          currentTemplates = JSON.parse(stored);
-        } catch (e) {
-          currentTemplates = DEFAULT_TEMPLATES;
-        }
-      } else {
-        currentTemplates = DEFAULT_TEMPLATES;
-      }
-
-      const hasDruidIntro = currentTemplates.some((t) => t.id === "druid_intro");
-      if (!hasDruidIntro) {
-        const filtered = currentTemplates.filter(
-          (t) => t.id !== "outreach1" && t.id !== "followup1" && t.id !== "pitch1"
-        );
-        currentTemplates = [...DEFAULT_TEMPLATES, ...filtered];
-        localStorage.setItem("email_templates", JSON.stringify(currentTemplates));
-      }
-      setTemplates(currentTemplates);
-    }
-  }, [isExpanded]);
 
   const extractMonth = (dateStr: string): string => {
     if (!dateStr) return "upcoming month";
@@ -440,48 +392,42 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
   const applyTemplateForContact = async (templateId: string, contact: any) => {
     const found = templates.find((t) => t.id === templateId);
-    if (found) {
-      let currentVars = found.variations;
-      let idx = found.currentIndex || 0;
+    if (!found) return;
 
-      if (!currentVars || currentVars.length < 2) {
-        currentVars = generateLocalVariationsClient(found.text);
-      }
+    const cached = variationsCache[templateId];
+    // Use cached variations (from a prior LLM fetch) or generate local ones now.
+    const hadLlmVariations = !!cached?.variations && cached.variations.length >= 2;
+    const currentVars = hadLlmVariations ? cached!.variations : generateLocalVariationsClient(found.text);
+    const idx = cached?.index ?? 0;
 
-      const rawText = currentVars[idx % currentVars.length];
-      const resolved = applyReplacementsForContact(rawText, contact);
-      setEmailText(resolved);
-      setSelectedComposeContact(contact);
+    const rawText = currentVars[idx % currentVars.length];
+    const resolved = applyReplacementsForContact(rawText, contact);
+    setEmailText(resolved);
+    setSelectedComposeContact(contact);
 
-      const nextIndex = (idx + 1) % currentVars.length;
-      const updated = templates.map((t) =>
-        t.id === templateId
-          ? { ...t, variations: currentVars, currentIndex: nextIndex }
-          : t,
-      );
-      setTemplates(updated);
-      localStorage.setItem("email_templates", JSON.stringify(updated));
+    // Advance the rotation for next time.
+    setVariationsCache((prev) => ({
+      ...prev,
+      [templateId]: { variations: currentVars, index: (idx + 1) % currentVars.length },
+    }));
 
-      if (!found.variations) {
-        try {
-          const res = await fetch("/api/email-variations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: found.text }),
-          });
-          const data = await res.json();
-          if (data.variations && Array.isArray(data.variations)) {
-            setTemplates((prev) => {
-              const live = prev.map((t) =>
-                t.id === templateId ? { ...t, variations: data.variations } : t,
-              );
-              localStorage.setItem("email_templates", JSON.stringify(live));
-              return live;
-            });
-          }
-        } catch (e) {
-          console.error("Failed to fetch variations in background:", e);
+    // First time for this template: fetch richer LLM variations in the background.
+    if (!hadLlmVariations) {
+      try {
+        const res = await fetch("/api/email-variations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: found.text }),
+        });
+        const data = await res.json();
+        if (data.variations && Array.isArray(data.variations) && data.variations.length >= 2) {
+          setVariationsCache((prev) => ({
+            ...prev,
+            [templateId]: { variations: data.variations, index: prev[templateId]?.index ?? 0 },
+          }));
         }
+      } catch (e) {
+        console.error("Failed to fetch variations in background:", e);
       }
     }
   };
@@ -512,55 +458,42 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       return;
     }
 
-    alert(
-      "DISCLAIMER & ROTATOR SETUP\n\nYour new template is being saved! 20 unique AI copy variations are currently being rendered by the Google Gemini LLM and will be placed on sequential rotation each time you select this template.",
-    );
-
-    const templateTextToVary = emailText;
+    const templateText = emailText;
     const templateName = newTemplateName.trim();
+    const shared = shareWithAll && isAdmin;
     setIsSavingTemplateMode(false);
     setNewTemplateName("");
-
-    const tempId = Math.random().toString(36).substring(2, 11);
-    const localVars = generateLocalVariationsClient(templateTextToVary);
-
-    const newTemplate: EmailTemplate = {
-      id: tempId,
-      name: templateName,
-      text: templateTextToVary,
-      variations: localVars,
-      currentIndex: 0,
-    };
-
-    const updated = [...templates, newTemplate];
-    setTemplates(updated);
-    localStorage.setItem("email_templates", JSON.stringify(updated));
-    setSelectedTemplateId(tempId);
+    setShareWithAll(false);
 
     try {
-      const response = await fetch("/api/email-variations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: templateTextToVary }),
-      });
-      const data = await response.json();
-      if (data.variations && Array.isArray(data.variations)) {
-        setTemplates((prev) => {
-          const live = prev.map((t) => {
-            if (t.id === tempId) {
-              return { ...t, variations: data.variations };
-            }
-            return t;
+      const newId = await createTemplate(templateName, templateText, shared, userDisplayName || "");
+      if (newId) setSelectedTemplateId(newId);
+      // Seed the rotation cache so it's usable immediately, then enrich via LLM.
+      if (newId) {
+        setVariationsCache((prev) => ({
+          ...prev,
+          [newId]: { variations: generateLocalVariationsClient(templateText), index: 0 },
+        }));
+        try {
+          const response = await fetch("/api/email-variations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: templateText }),
           });
-          localStorage.setItem("email_templates", JSON.stringify(live));
-          return live;
-        });
+          const data = await response.json();
+          if (data.variations && Array.isArray(data.variations) && data.variations.length >= 2) {
+            setVariationsCache((prev) => ({
+              ...prev,
+              [newId]: { variations: data.variations, index: prev[newId]?.index ?? 0 },
+            }));
+          }
+        } catch (err) {
+          console.error("Failed to generate LLM variations, using local fallback:", err);
+        }
       }
     } catch (err) {
-      console.error(
-        "Failed to generate variations via LLM API, using fallback:",
-        err,
-      );
+      console.error("Failed to save template:", err);
+      alert("Failed to save template. Please try again.");
     }
   };
 
@@ -1048,8 +981,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                     {selectedTemplateId && (
                       <span className="text-[8px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20 font-mono animate-pulse uppercase tracking-wider font-bold">
                         Rotator active - copy #
-                        {(templates.find((t) => t.id === selectedTemplateId)
-                          ?.currentIndex || 0) + 1}
+                        {(variationsCache[selectedTemplateId]?.index || 0) + 1}
                         /20
                       </span>
                     )}
@@ -1075,14 +1007,13 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                           if (selectedTemplateId) {
                             const found = templates.find(t => t.id === selectedTemplateId);
                             if (found) {
-                              let currentVars = found.variations;
-                              let idx = found.currentIndex || 0;
-                              if (!currentVars || currentVars.length < 2) {
-                                currentVars = generateLocalVariationsClient(found.text);
-                              }
-                              const rawText = currentVars[idx % currentVars.length];
-                              const resolved = applyReplacementsForContact(rawText, contact);
-                              setEmailText(resolved);
+                              const cached = variationsCache[selectedTemplateId];
+                              const vars = (cached?.variations && cached.variations.length >= 2)
+                                ? cached.variations
+                                : generateLocalVariationsClient(found.text);
+                              const idx = cached?.index ?? 0;
+                              const rawText = vars[idx % vars.length];
+                              setEmailText(applyReplacementsForContact(rawText, contact));
                             }
                           }
                         }}
@@ -1146,20 +1077,29 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                                   setIsTemplateMenuOpen(false);
                                 }}
                               >
-                                <span className="truncate pr-2 font-sans font-medium">
+                                <span className="truncate pr-2 font-sans font-medium flex items-center gap-1.5">
                                   {tpl.name}
+                                  {tpl.scope === 'shared' && (
+                                    <span className="text-[7px] uppercase tracking-wider font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded px-1 py-px shrink-0">Shared</span>
+                                  )}
+                                  {tpl.scope === 'default' && (
+                                    <span className="text-[7px] uppercase tracking-wider font-bold text-slate-400 bg-white/5 border border-white/10 rounded px-1 py-px shrink-0">Default</span>
+                                  )}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteTemplate(tpl.id);
-                                  }}
-                                  className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold"
-                                  title="Delete Template"
-                                >
-                                  ✕
-                                </button>
+                                {canDelete(tpl) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (tpl.scope === 'shared' && !confirm(`Delete shared template "${tpl.name}" for ALL salespeople?`)) return;
+                                      handleDeleteTemplate(tpl);
+                                    }}
+                                    className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold"
+                                    title={tpl.scope === 'shared' ? "Delete shared template" : "Delete template"}
+                                  >
+                                    ✕
+                                  </button>
+                                )}
                               </div>
                             ))
                           )}
@@ -1179,6 +1119,17 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                           onChange={(e) => setNewTemplateName(e.target.value)}
                           className="bg-transparent border-none text-[9px] text-white focus:outline-none w-[90px] font-sans"
                         />
+                        {isAdmin && (
+                          <label className="flex items-center gap-1 text-[8px] text-slate-300 cursor-pointer select-none shrink-0" title="Make this template available to all salespeople">
+                            <input
+                              type="checkbox"
+                              checked={shareWithAll}
+                              onChange={(e) => setShareWithAll(e.target.checked)}
+                              className="h-2.5 w-2.5 accent-sky-500 cursor-pointer"
+                            />
+                            Share all
+                          </label>
+                        )}
                         <button
                           type="button"
                           onClick={handleConfirmSaveTemplate}
@@ -1191,6 +1142,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                           onClick={() => {
                             setIsSavingTemplateMode(false);
                             setNewTemplateName("");
+                            setShareWithAll(false);
                           }}
                           className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-400 rounded text-[8px] cursor-pointer"
                         >
@@ -1466,27 +1418,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                         ? event.contacts[0]
                         : null;
                     setSelectedComposeContact(firstContact);
-
-                    const stored = localStorage.getItem("email_templates");
-                    let currentTemplates = templates;
-                    if (stored) {
-                      try {
-                        currentTemplates = JSON.parse(stored);
-                      } catch {}
-                    }
-                    const found =
-                      currentTemplates.find((t) => t.id === defaultTemplateId) ||
-                      DEFAULT_TEMPLATES.find((t) => t.id === defaultTemplateId);
-                    if (found) {
-                      let currentVars = found.variations;
-                      let idx = found.currentIndex || 0;
-                      if (!currentVars || currentVars.length < 2) {
-                        currentVars = generateLocalVariationsClient(found.text);
-                      }
-                      const rawText = currentVars[idx % currentVars.length];
-                      const resolved = applyReplacementsForContact(rawText, firstContact);
-                      setEmailText(resolved);
-                    }
+                    applyTemplateForContact(defaultTemplateId, firstContact);
                   }
                 }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-[10px] uppercase font-mono tracking-widest bg-gradient-to-b from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white font-extrabold rounded-xl transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 focus:outline-none border-2 border-white/90 hover:border-white shadow-[0_12px_28px_rgba(20,184,166,0.45),_0_4px_8px_rgba(0,0,0,0.5)]"
