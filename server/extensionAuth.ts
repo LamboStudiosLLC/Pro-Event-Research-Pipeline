@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { getAdminDb } from "./firebaseAdmin";
+import { getAdminDb } from "./firebaseAdmin.js";
 
 // Resolved identity behind an extension API key. The key maps to a single
 // Firebase user + project, so today it's just you; adding more reps later is
