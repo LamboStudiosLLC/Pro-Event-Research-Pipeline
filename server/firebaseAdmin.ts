@@ -1,11 +1,13 @@
 import { writeFileSync } from "node:fs";
-import { initializeApp, getApps, cert, applicationDefault } from "firebase-admin/app";
-import { getFirestore, Firestore } from "firebase-admin/firestore";
-import { getAuth, Auth } from "firebase-admin/auth";
+import type { Firestore } from "firebase-admin/firestore";
+import type { Auth } from "firebase-admin/auth";
 
-// Lazily initialised so the server can boot (and the Gemini routes keep
-// working) even when no credential is configured. Only the /api/extension/*
-// routes need it, and they surface a clear error if credentials are missing.
+// firebase-admin is imported DYNAMICALLY (not statically) so it never enters the
+// load-time module graph of the Express app. Statically importing it bundled the
+// whole heavy gRPC dependency into Vercel's serverless function and crashed every
+// /api/* route at cold start. Dynamic import keeps it external + lazy: the Gemini
+// routes load fine, and firebase-admin is only pulled in when an extension route
+// actually runs. These accessors are therefore async.
 let cachedDb: Firestore | null = null;
 let wifTokenPath: string | null = null;
 
@@ -22,9 +24,8 @@ function syncVercelOidcToken() {
   }
 }
 
-// Ensure the default admin app exists before anything (Firestore OR Auth) uses
-// it; also refresh the Vercel OIDC token on every call.
-function ensureApp() {
+async function ensureApp() {
+  const { getApps, initializeApp, cert, applicationDefault } = await import("firebase-admin/app");
   if (getApps().length) {
     syncVercelOidcToken();
     return;
@@ -61,9 +62,10 @@ function ensureApp() {
   initializeApp({ credential: applicationDefault(), projectId });
 }
 
-export function getAdminDb(): Firestore {
-  ensureApp();
+export async function getAdminDb(): Promise<Firestore> {
+  await ensureApp();
   if (cachedDb) return cachedDb;
+  const { getFirestore } = await import("firebase-admin/firestore");
   // The project uses the (default) Firestore database. If that ever changes,
   // set FIREBASE_FIRESTORE_DATABASE_ID to the named database id.
   const dbId = process.env.FIREBASE_FIRESTORE_DATABASE_ID;
@@ -71,7 +73,8 @@ export function getAdminDb(): Firestore {
   return cachedDb;
 }
 
-export function getAdminAuth(): Auth {
-  ensureApp();
+export async function getAdminAuth(): Promise<Auth> {
+  await ensureApp();
+  const { getAuth } = await import("firebase-admin/auth");
   return getAuth();
 }

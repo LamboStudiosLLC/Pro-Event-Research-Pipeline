@@ -10,7 +10,7 @@ import { isLeadMatch } from "../src/lib/leadMatching";
 // Templates available to an extension user: the built-in default, every shared
 // (admin-created) template, and that user's own personal templates.
 async function loadTemplatesForUser(uid: string): Promise<ExtensionTemplate[]> {
-  const db = getAdminDb();
+  const db = await getAdminDb();
   const [shared, personal] = await Promise.all([
     db.collection("shared_templates").get(),
     db.collection("users").doc(uid).collection("templates").get(),
@@ -83,7 +83,8 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
       let uid: string;
       let tokenName = "";
       try {
-        const decoded = await getAdminAuth().verifyIdToken(idToken);
+        const adminAuth = await getAdminAuth();
+        const decoded = await adminAuth.verifyIdToken(idToken);
         uid = decoded.uid;
         tokenName = (decoded.name as string) ?? "";
       } catch (e: any) {
@@ -94,7 +95,7 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
       const projectId = req.body?.projectId;
       if (!projectId) return res.status(400).json({ error: "projectId is required" });
 
-      const db = getAdminDb();
+      const db = await getAdminDb();
       // Defense in depth: the project must belong to the authenticated user.
       const project = await db
         .collection("users")
@@ -140,7 +141,8 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
       // Prefer the per-key sender name; fall back to the user's display name.
       let senderName = auth.senderName;
       if (!senderName) {
-        const user = await getAdminDb().collection("users").doc(auth.uid).get();
+        const adminDb = await getAdminDb();
+        const user = await adminDb.collection("users").doc(auth.uid).get();
         senderName = user.data()?.displayName ?? "";
       }
 
@@ -162,7 +164,8 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
       if (!auth) return res.status(401).json({ error: "Unauthorized" });
 
       const showAll = req.query.all === "1";
-      const eventsRef = getAdminDb()
+      const adminDb = await getAdminDb();
+      const eventsRef = adminDb
         .collection("users")
         .doc(auth.uid)
         .collection("projects")
@@ -269,7 +272,7 @@ ${interpolated}`;
       const { eventId } = req.body ?? {};
       if (!eventId) return res.status(400).json({ error: "eventId is required" });
 
-      const db = getAdminDb();
+      const db = await getAdminDb();
       const eventRef = db
         .collection("users")
         .doc(auth.uid)
