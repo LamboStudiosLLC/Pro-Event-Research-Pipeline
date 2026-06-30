@@ -154,19 +154,20 @@ const generateLocalVariationsClient = (text: string): string[] => {
 
 const DEFAULT_TEMPLATES: EmailTemplate[] = [
   {
-    id: "outreach1",
-    name: "Outreach & Inquiry",
-    text: `Hi [Contact Name],\n\nI hope you are having an excellent week.\n\nI am reaching out representing our organization. I noticed you are involved with [Event Name] and we are very interested in learning more about your solutions and current focus.\n\nWould you have 10-15 minutes in the coming days for a brief introductory greeting call to share insights?\n\nBest regards,\n[Salesperson]`,
-  },
-  {
-    id: "followup1",
-    name: "Post-Event Follow-up",
-    text: `Hi [Contact Name],\n\nIt was great meeting you and discussing your team's objectives during [Event Name]!\n\nI wanted to share our latest resources. Our company specializes in delivering highly optimized solutions that align perfectly with the goals we spoke about.\n\nLet me know if you are open to a follow-up discussion on Tuesday or Thursday next week.\n\nBest,\n[Salesperson]`,
-  },
-  {
-    id: "pitch1",
-    name: "Vendor Request Proposal",
-    text: `Hi procurement team,\n\nWe are looking to secure a premier partnership deal. During our evaluation of [Vendor Name], we were highly impressed by the breadth of your services and corporate track records.\n\nAre you available for a exploratory sales consultation to discuss how we can work together?\n\nThank you,\n[Salesperson]`,
+    id: "druid_intro",
+    name: "Druid Event Introduction",
+    text: `Hello!
+
+My name is Chris, I'm the owner of Druid Productions. A colleague informed me of your upcoming event in [Month] and encouraged me to reach out as we work with many similar companies and events. Hopefully I have the correct contact, this is my first time attempting to introduce our company to yours. Please let me know if this ended up in the right place!
+
+Druid Productions is 100% dedicated to event video and photography coverage, providing a wide range of services for major events across the US. Specializing in coverage for corporate events, summits, expos, trade shows and conferences, our work includes many of the premier events and brands in the US. Druid has developed a reputation as a reliable high quality vendor in the event space.
+
+We are a national company, fulfilling ongoing services for our clients year after year in all 50 states. A significant portion of the work we do is in the [Location] area.
+You may already have someone lined up to assist with your event, but in case you still need help, I wanted to introduce myself and start a conversation. Druid has some unique offerings that can complement your existing production, or we can step in as a turnkey solution for any event size or production level.
+
+My teams use the most modern equipment and we provide a premium service at an excellent price. All my staff are veterans in the event industry and we show up with total professionalism. Should your project require editing services, our team of editors is standing by and we include a robust review process with every video we deliver.
+ I appreciate your time.
+Please check us out and see what our clients have to say. If you are impressed with what you see, let me know if you would like to discuss the possibilities of working together on your upcoming initiatives. We come highly rated and won't stop until you're 100% satisfied.`,
   },
 ];
 
@@ -344,19 +345,26 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   useEffect(() => {
     if (isExpanded) {
       const stored = localStorage.getItem("email_templates");
+      let currentTemplates: EmailTemplate[] = [];
       if (stored) {
         try {
-          setTemplates(JSON.parse(stored));
+          currentTemplates = JSON.parse(stored);
         } catch (e) {
-          setTemplates(DEFAULT_TEMPLATES);
+          currentTemplates = DEFAULT_TEMPLATES;
         }
       } else {
-        setTemplates(DEFAULT_TEMPLATES);
-        localStorage.setItem(
-          "email_templates",
-          JSON.stringify(DEFAULT_TEMPLATES),
-        );
+        currentTemplates = DEFAULT_TEMPLATES;
       }
+
+      const hasDruidIntro = currentTemplates.some((t) => t.id === "druid_intro");
+      if (!hasDruidIntro) {
+        const filtered = currentTemplates.filter(
+          (t) => t.id !== "outreach1" && t.id !== "followup1" && t.id !== "pitch1"
+        );
+        currentTemplates = [...DEFAULT_TEMPLATES, ...filtered];
+        localStorage.setItem("email_templates", JSON.stringify(currentTemplates));
+      }
+      setTemplates(currentTemplates);
     }
   }, [isExpanded]);
 
@@ -1002,7 +1010,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
               >
                 {/* Header */}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-2.5 shrink-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Mail className="h-4 w-4 text-primary animate-pulse" />
                     <span className="text-[10px] font-bold text-white uppercase tracking-wider font-mono">
                       AI Email Composer
@@ -1015,6 +1023,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                         /20
                       </span>
                     )}
+                    <span className="text-[9.5px] text-orange-400 font-bold border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 rounded-lg animate-pulse ml-2">
+                      ⚠️ Please check 'Location' and 'Month' in message for accuracy before sending!
+                    </span>
                   </div>
 
                   {/* Template actions */}
@@ -1408,7 +1419,41 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
               {/* Larger Compose Email Button at top of Column 3 */}
               <button
                 type="button"
-                onClick={() => setIsComposerOpen(!isComposerOpen)}
+                onClick={() => {
+                  const nextVal = !isComposerOpen;
+                  setIsComposerOpen(nextVal);
+                  if (nextVal) {
+                    const defaultTemplateId = "druid_intro";
+                    setSelectedTemplateId(defaultTemplateId);
+
+                    const firstContact =
+                      event.contacts && event.contacts.length > 0
+                        ? event.contacts[0]
+                        : null;
+                    setSelectedComposeContact(firstContact);
+
+                    const stored = localStorage.getItem("email_templates");
+                    let currentTemplates = templates;
+                    if (stored) {
+                      try {
+                        currentTemplates = JSON.parse(stored);
+                      } catch {}
+                    }
+                    const found =
+                      currentTemplates.find((t) => t.id === defaultTemplateId) ||
+                      DEFAULT_TEMPLATES.find((t) => t.id === defaultTemplateId);
+                    if (found) {
+                      let currentVars = found.variations;
+                      let idx = found.currentIndex || 0;
+                      if (!currentVars || currentVars.length < 2) {
+                        currentVars = generateLocalVariationsClient(found.text);
+                      }
+                      const rawText = currentVars[idx % currentVars.length];
+                      const resolved = applyReplacementsForContact(rawText, firstContact);
+                      setEmailText(resolved);
+                    }
+                  }
+                }}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-[10px] uppercase font-mono tracking-widest bg-gradient-to-b from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white font-extrabold rounded-xl transition-all hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 focus:outline-none border-2 border-white/90 hover:border-white shadow-[0_12px_28px_rgba(20,184,166,0.45),_0_4px_8px_rgba(0,0,0,0.5)]"
               >
                 <Mail className="h-4 w-4 text-white shrink-0 animate-pulse" />
