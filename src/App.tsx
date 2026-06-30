@@ -91,7 +91,7 @@ const AppContent = () => {
             "flex-1 overflow-auto custom-scrollbar flex flex-col transition-all duration-300 absolute inset-6",
             mode === 'admin' ? "opacity-100 scale-100 z-10 pointer-events-auto" : "opacity-0 scale-95 z-0 pointer-events-none"
           )}>
-            <AdminMode />
+            <AdminMode activeProjectId={activeProjectId} />
           </div>
         </div>
       </main>

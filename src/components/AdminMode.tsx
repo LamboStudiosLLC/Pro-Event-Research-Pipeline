@@ -6,12 +6,13 @@ import {
   Users, TrendingUp, CheckCircle, ChevronRight, Shield,
   ArrowLeft, Search, Filter, ExternalLink, Calendar, Globe,
   ChevronDown, ArrowUp, ArrowDown, SlidersHorizontal, ChevronUp, Clock, Mail, MessageSquare,
-  X, Lock, RotateCcw, Archive, ShieldAlert, Trash2
+  X, Lock, RotateCcw, Archive, ShieldAlert, Trash2, KeyRound, Copy, Check
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import PipelineCard from './PipelineCard';
 import { isLeadMatch } from '@/src/lib/leadMatching';
+import { useFirebase } from './FirebaseProvider';
 
 const STAGES = [
   { id: 'Initial',   label: 'Not Started' },
@@ -498,7 +499,143 @@ const SalespersonDetail: React.FC<DetailViewProps> = ({ user, onBack }) => {
   );
 };
 
-const AdminMode: React.FC = () => {
+// ─── Extension Key Modal ────────────────────────────────────────────────────
+// Lets a signed-in user reveal/generate the API key for the Druid Outreach
+// Assistant Chrome extension, bound to one of their projects.
+
+interface ProjectOption { id: string; name: string; }
+
+const ExtensionKeyModal: React.FC<{ defaultProjectId: string | null; onClose: () => void }> = ({ defaultProjectId, onClose }) => {
+  const { user } = useFirebase();
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>('');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'users', user.uid, 'projects'));
+        const list = snap.docs.map(d => ({ id: d.id, name: (d.data().name as string) || 'Untitled project' }));
+        setProjects(list);
+        const initial = (defaultProjectId && list.some(p => p.id === defaultProjectId))
+          ? defaultProjectId
+          : (list[0]?.id ?? '');
+        setSelectedProjectId(initial);
+      } catch (e: any) {
+        setError(e.message || 'Failed to load projects.');
+      }
+    })();
+  }, [user, defaultProjectId]);
+
+  // The key is project-specific, so clear a revealed key when the project changes.
+  useEffect(() => { setApiKey(''); setCopied(false); }, [selectedProjectId]);
+
+  const revealKey = async () => {
+    if (!user || !selectedProjectId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/extension/issue-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ projectId: selectedProjectId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to issue key.');
+      setApiKey(data.key);
+    } catch (e: any) {
+      setError(e.message || 'Failed to issue key.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyKey = () => {
+    navigator.clipboard.writeText(apiKey).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  };
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="glass rounded-2xl border border-white/10 w-full max-w-md p-6 space-y-5"
+        initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2.5">
+            <KeyRound className="h-5 w-5 text-primary" />
+            <div>
+              <h3 className="text-base font-semibold text-white leading-tight">Extension Key</h3>
+              <p className="text-xs text-slate-500 mt-0.5">For the Druid Outreach Assistant browser extension</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Project</label>
+          <div className="relative">
+            <select
+              value={selectedProjectId}
+              onChange={e => setSelectedProjectId(e.target.value)}
+              className="w-full appearance-none bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary/50 cursor-pointer"
+            >
+              {projects.length === 0 && <option value="" className="bg-[#030712]">No projects found</option>}
+              {projects.map(p => <option key={p.id} value={p.id} className="bg-[#030712]">{p.name}</option>)}
+            </select>
+            <ChevronDown className="h-4 w-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+          <p className="text-[11px] text-slate-500">The extension will show events from this project.</p>
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        {apiKey ? (
+          <div className="space-y-2">
+            <label className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Your Key</label>
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg p-2.5">
+              <code className="flex-1 text-xs text-emerald-300 break-all select-all">{apiKey}</code>
+              <button
+                onClick={copyKey}
+                className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-xs text-white transition-colors"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">Paste this into the extension's Settings panel. Keep it private — it grants access to this project's leads.</p>
+          </div>
+        ) : (
+          <button
+            onClick={revealKey}
+            disabled={loading || !selectedProjectId}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary/90 hover:bg-primary text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <KeyRound className="h-4 w-4" />
+            {loading ? 'Revealing…' : 'Reveal Key'}
+          </button>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+};
+
+interface AdminModeProps { activeProjectId?: string | null; }
+
+const AdminMode: React.FC<AdminModeProps> = ({ activeProjectId = null }) => {
+  const [showKeyModal, setShowKeyModal] = useState(false);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [claimedLeads, setClaimedLeads] = useState<ClaimedLead[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -614,10 +751,25 @@ const AdminMode: React.FC = () => {
 
   return (
     <div className="space-y-6 select-text">
-      <div>
-        <h2 className="text-xl font-semibold text-white">Admin Dashboard</h2>
-        <p className="text-sm text-slate-400 mt-0.5">Team pipeline overview</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Admin Dashboard</h2>
+          <p className="text-sm text-slate-400 mt-0.5">Team pipeline overview</p>
+        </div>
+        <button
+          onClick={() => setShowKeyModal(true)}
+          className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-white transition-colors"
+        >
+          <KeyRound className="h-4 w-4 text-primary" />
+          Extension Key
+        </button>
       </div>
+
+      <AnimatePresence>
+        {showKeyModal && (
+          <ExtensionKeyModal defaultProjectId={activeProjectId} onClose={() => setShowKeyModal(false)} />
+        )}
+      </AnimatePresence>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">

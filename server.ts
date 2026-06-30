@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { registerExtensionRoutes } from "./server/extension";
 
 dotenv.config();
 
@@ -842,6 +843,11 @@ app.post("/api/firecrawl-scrape", async (req, res) => {
     }
   }
 });
+
+// Chrome extension (Druid Outreach Assistant) API — reads/writes the same
+// Firestore data the web app uses. Registered before the Vite catch-all so the
+// SPA fallback never intercepts these routes.
+registerExtensionRoutes(app, ai);
 
 // Vite middleware for development
 async function setupVite() {
