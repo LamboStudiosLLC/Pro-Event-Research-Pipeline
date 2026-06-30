@@ -56,6 +56,17 @@ async function ensureApp() {
     process.env.GOOGLE_APPLICATION_CREDENTIALS = configPath;
   }
 
+  // Clear diagnostic when running on Vercel without a usable credential source,
+  // instead of the opaque "Could not load the default credentials".
+  if (process.env.VERCEL && !raw && !(wifConfig && process.env.VERCEL_OIDC_TOKEN)) {
+    throw new Error(
+      "Firebase Admin credentials missing on Vercel — " +
+        `GOOGLE_WIF_CONFIG: ${wifConfig ? "set" : "MISSING"}, ` +
+        `VERCEL_OIDC_TOKEN: ${process.env.VERCEL_OIDC_TOKEN ? "present" : "MISSING"}, ` +
+        `FIREBASE_PROJECT_ID: ${projectId ? "set" : "MISSING"}.`
+    );
+  }
+
   // Application Default Credentials — covers Vercel WIF (above), `gcloud auth
   // application-default login` (keyless local dev), a GOOGLE_APPLICATION_CREDENTIALS
   // key file, and Cloud Run's metadata server. No downloadable key required.
