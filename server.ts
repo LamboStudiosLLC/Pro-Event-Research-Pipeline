@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { registerExtensionRoutes } from "./server/extension";
 
 dotenv.config();
 
@@ -844,11 +843,6 @@ app.post("/api/firecrawl-scrape", async (req, res) => {
   }
 });
 
-// Chrome extension (Druid Outreach Assistant) API — reads/writes the same
-// Firestore data the web app uses. Registered before the Vite catch-all so the
-// SPA fallback never intercepts these routes.
-registerExtensionRoutes(app, ai);
-
 // Vite middleware for development
 async function setupVite() {
   if (process.env.NODE_ENV !== "production") {
@@ -868,7 +862,15 @@ async function setupVite() {
 }
 
 if (!process.env.VERCEL) {
-  setupVite().then(() => {
+  // Local dev convenience: serve the extension API from this same process so
+  // localhost testing works. On Vercel these routes live in a SEPARATE function
+  // (api/extension) — nothing from the extension/firebase-admin graph is ever
+  // imported here, so the core API can't be affected by it. The dynamic import
+  // is guarded by !VERCEL so it never runs (or bundles into) the core function.
+  import("./server/extension").then(({ registerExtensionRoutes }) => {
+    registerExtensionRoutes(app, ai);
+    return setupVite();
+  }).then(() => {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://0.0.0.0:${PORT}`);
     });
