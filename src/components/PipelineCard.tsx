@@ -1039,7 +1039,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 className="col-span-1 md:col-span-2 bg-[#090d16]/85 p-4 rounded-xl border border-primary/25 flex flex-col justify-between shadow-2xl relative select-text mb-2 min-h-[320px] h-full space-y-3"
               >
                 {/* Header */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-2.5 shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-2 shrink-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Mail className="h-4 w-4 text-primary animate-pulse" />
                     <span className="text-[10px] font-bold text-white uppercase tracking-wider font-mono">
@@ -1057,71 +1057,119 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                       ⚠️ Please check 'Location' and 'Month' in message for accuracy before sending!
                     </span>
                   </div>
+                </div>
 
-                  {/* Template actions */}
-                  <div className="flex flex-wrap items-center gap-2 ml-auto shrink-0">
-                    {/* Custom Dropdown menu with red delete "X" */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setIsTemplateMenuOpen(!isTemplateMenuOpen)
-                        }
-                        className="bg-black/60 border border-white/10 hover:border-white/20 rounded px-2.5 py-1 text-[9px] text-slate-205 focus:outline-none focus:border-primary/40 flex items-center justify-between gap-1.5 font-mono font-medium min-w-[130px] max-w-[170px] cursor-pointer"
+                {/* Combined Sub-header Row */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-xs text-slate-350 shrink-0 border-b border-white/5 pb-2">
+                  {/* To: Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-slate-500">To:</span>
+                    <div className="relative min-w-[170px] max-w-[200px]">
+                      <select
+                        value={selectedComposeContact ? (event.contacts || []).indexOf(selectedComposeContact) : -1}
+                        onChange={(e) => {
+                          const idx = parseInt(e.target.value);
+                          const contact = idx >= 0 ? (event.contacts || [])[idx] : null;
+                          setSelectedComposeContact(contact);
+                          // If there is an active template, re-apply replacements for this contact
+                          if (selectedTemplateId) {
+                            const found = templates.find(t => t.id === selectedTemplateId);
+                            if (found) {
+                              let currentVars = found.variations;
+                              let idx = found.currentIndex || 0;
+                              if (!currentVars || currentVars.length < 2) {
+                                currentVars = generateLocalVariationsClient(found.text);
+                              }
+                              const rawText = currentVars[idx % currentVars.length];
+                              const resolved = applyReplacementsForContact(rawText, contact);
+                              setEmailText(resolved);
+                            }
+                          }
+                        }}
+                        className="bg-black/60 border border-white/10 hover:border-white/20 rounded px-2 py-0.5 text-[10px] text-white focus:outline-none focus:border-primary/40 cursor-pointer w-full appearance-none pr-6 font-sans font-medium"
                       >
-                        <span className="truncate">
-                          {selectedTemplateId
-                            ? templates.find((t) => t.id === selectedTemplateId)
-                                ?.name || "Custom Draft"
-                            : "-- Choose Template --"}
-                        </span>
-                        <ChevronDown className="h-2.5 w-2.5 text-slate-450 shrink-0" />
-                      </button>
-
-                      {isTemplateMenuOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-40"
-                            onClick={() => setIsTemplateMenuOpen(false)}
-                          />
-                          <div className="absolute right-0 mt-1 w-[220px] bg-[#0c101a] border border-white/10 rounded-lg shadow-2xl py-1 z-50 max-h-[180px] overflow-y-auto custom-scrollbar">
-                            {templates.length === 0 ? (
-                              <div className="px-3 py-2 text-[8px] text-slate-450 italic">
-                                No templates available.
-                              </div>
-                            ) : (
-                              templates.map((tpl) => (
-                                <div
-                                  key={tpl.id}
-                                  className="flex items-center justify-between px-2.5 py-1.5 hover:bg-white/[0.04] text-[9.5px] text-slate-200 transition-colors cursor-pointer group"
-                                  onClick={() => {
-                                    handleSelectTemplate(tpl.id);
-                                    setIsTemplateMenuOpen(false);
-                                  }}
-                                >
-                                  <span className="truncate pr-2 font-sans font-medium">
-                                    {tpl.name}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteTemplate(tpl.id);
-                                    }}
-                                    className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold"
-                                    title="Delete Template"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </>
-                      )}
+                        <option value={-1}>-- Select Recipient --</option>
+                        {(event.contacts || []).map((contact, idx) => (
+                          <option key={idx} value={idx}>
+                            {contact.name} {contact.role ? `(${contact.role})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-555 text-[8px]">▼</div>
                     </div>
+                  </div>
 
-                    {/* Button Save As Template */}
+                  {/* Using Indicator */}
+                  {selectedComposeContact && (
+                    <span className="text-[9.5px] text-slate-450 truncate">
+                      Using: <span className="text-white font-semibold font-mono">{selectedComposeContact.name}</span>
+                    </span>
+                  )}
+
+                  {/* Divider line */}
+                  <div className="hidden sm:block h-3.5 w-px bg-white/10" />
+
+                  {/* Template Dropdown */}
+                  <div className="flex items-center gap-1.5 relative">
+                    <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-slate-500">Template:</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsTemplateMenuOpen(!isTemplateMenuOpen)}
+                      className="bg-black/60 border border-white/10 hover:border-white/20 rounded px-2.5 py-0.5 text-[10px] text-slate-200 focus:outline-none focus:border-primary/40 flex items-center justify-between gap-1.5 font-sans font-medium min-w-[130px] max-w-[170px] cursor-pointer"
+                    >
+                      <span className="truncate">
+                        {selectedTemplateId
+                          ? templates.find((t) => t.id === selectedTemplateId)?.name || "Custom Draft"
+                          : "-- Choose Template --"}
+                      </span>
+                      <ChevronDown className="h-2.5 w-2.5 text-slate-450 shrink-0" />
+                    </button>
+
+                    {isTemplateMenuOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setIsTemplateMenuOpen(false)}
+                        />
+                        <div className="absolute top-full left-0 mt-1 w-[200px] bg-[#0c101a] border border-white/10 rounded-lg shadow-2xl py-1 z-50 max-h-[180px] overflow-y-auto custom-scrollbar">
+                          {templates.length === 0 ? (
+                            <div className="px-3 py-2 text-[8px] text-slate-450 italic">
+                              No templates available.
+                            </div>
+                          ) : (
+                            templates.map((tpl) => (
+                              <div
+                                key={tpl.id}
+                                className="flex items-center justify-between px-2.5 py-1.5 hover:bg-white/[0.04] text-[9.5px] text-slate-200 transition-colors cursor-pointer group"
+                                onClick={() => {
+                                  handleSelectTemplate(tpl.id);
+                                  setIsTemplateMenuOpen(false);
+                                }}
+                              >
+                                <span className="truncate pr-2 font-sans font-medium">
+                                  {tpl.name}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteTemplate(tpl.id);
+                                  }}
+                                  className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold"
+                                  title="Delete Template"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Save As Template actions */}
+                  <div className="flex items-center gap-1.5">
                     {isSavingTemplateMode ? (
                       <div className="flex items-center bg-black/60 border border-white/10 rounded px-1.5 py-0.5 gap-1.5 min-w-[180px]">
                         <input
@@ -1153,55 +1201,12 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsSavingTemplateMode(true)}
-                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded text-[9px] font-bold cursor-pointer transition-all hover:text-white"
+                        className="px-2.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-350 border border-white/10 rounded text-[9.5px] font-bold cursor-pointer transition-all hover:text-white"
                       >
                         Save As Template
                       </button>
                     )}
                   </div>
-                </div>
-
-                {/* To Recipient Selector Row */}
-                <div className="flex items-center gap-2 px-1 text-xs text-slate-350 shrink-0">
-                  <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-slate-500">To:</span>
-                  <div className="relative flex-1 max-w-[280px]">
-                    <select
-                      value={selectedComposeContact ? (event.contacts || []).indexOf(selectedComposeContact) : -1}
-                      onChange={(e) => {
-                        const idx = parseInt(e.target.value);
-                        const contact = idx >= 0 ? (event.contacts || [])[idx] : null;
-                        setSelectedComposeContact(contact);
-                        // If there is an active template, re-apply replacements for this contact
-                        if (selectedTemplateId) {
-                          const found = templates.find(t => t.id === selectedTemplateId);
-                          if (found) {
-                            let currentVars = found.variations;
-                            let idx = found.currentIndex || 0;
-                            if (!currentVars || currentVars.length < 2) {
-                              currentVars = generateLocalVariationsClient(found.text);
-                            }
-                            const rawText = currentVars[idx % currentVars.length];
-                            const resolved = applyReplacementsForContact(rawText, contact);
-                            setEmailText(resolved);
-                          }
-                        }
-                      }}
-                      className="bg-black/60 border border-white/10 hover:border-white/20 rounded px-2.5 py-1 text-[11px] text-white focus:outline-none focus:border-primary/40 cursor-pointer w-full appearance-none pr-8 font-sans font-medium"
-                    >
-                      <option value={-1}>-- Select Recipient / Team --</option>
-                      {(event.contacts || []).map((contact, idx) => (
-                        <option key={idx} value={idx}>
-                          {contact.name} {contact.role ? `(${contact.role})` : ""} {contact.email ? `[${contact.email}]` : "[No email]"}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500 text-[10px]">▼</div>
-                  </div>
-                  {selectedComposeContact && (
-                    <span className="text-[10px] text-slate-450 truncate">
-                      Using: <span className="text-white font-semibold font-mono">{selectedComposeContact.name}</span>
-                    </span>
-                  )}
                 </div>
 
                 {/* Body Composition space - utilizes the full remaining height of the container */}
