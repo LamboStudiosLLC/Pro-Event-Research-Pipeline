@@ -74,6 +74,17 @@ service cloud.firestore {
           allow read, write: if isOwner(userId) || isAdmin();
         }
       }
+
+      // Personal email templates — owned by the user (admins may manage any).
+      match /templates/{templateId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Shared email templates — readable by any signed-in user, writable by admins.
+    match /shared_templates/{templateId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /claimed_leads/{claimId} {
