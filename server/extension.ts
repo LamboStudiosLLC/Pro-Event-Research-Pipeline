@@ -2,10 +2,10 @@ import { randomBytes } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import type { Query } from "firebase-admin/firestore";
 import type { GoogleGenAI } from "@google/genai";
-import { getAdminDb, getAdminAuth } from "./firebaseAdmin";
-import { resolveExtensionAuth, extensionCors } from "./extensionAuth";
-import { BUILT_IN_TEMPLATE, DEFAULT_SUBJECT, applyReplacements, type ExtensionTemplate } from "./templates";
-import { isLeadMatch } from "../src/lib/leadMatching";
+import { getAdminDb, getAdminAuth } from "./firebaseAdmin.js";
+import { resolveExtensionAuth, extensionCors } from "./extensionAuth.js";
+import { BUILT_IN_TEMPLATE, DEFAULT_SUBJECT, applyReplacements, type ExtensionTemplate } from "./templates.js";
+import { isLeadMatch } from "../src/lib/leadMatching.js";
 
 // Templates available to an extension user: the built-in default, every shared
 // (admin-created) template, and that user's own personal templates.

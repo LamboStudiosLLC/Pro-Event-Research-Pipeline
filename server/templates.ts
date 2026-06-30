@@ -8,7 +8,7 @@ import {
   DEFAULT_TEMPLATE_NAME,
   DEFAULT_TEMPLATE_SUBJECT,
   DEFAULT_TEMPLATE_TEXT,
-} from "../src/lib/defaultTemplate";
+} from "../src/lib/defaultTemplate.js";
 
 export interface ExtensionTemplate {
   id: string;

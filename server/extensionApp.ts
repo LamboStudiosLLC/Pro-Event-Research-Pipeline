@@ -5,7 +5,7 @@
 import express from "express";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { registerExtensionRoutes } from "./extension";
+import { registerExtensionRoutes } from "./extension.js";
 
 dotenv.config();
 

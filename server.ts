@@ -867,7 +867,7 @@ if (!process.env.VERCEL) {
   // (api/extension) — nothing from the extension/firebase-admin graph is ever
   // imported here, so the core API can't be affected by it. The dynamic import
   // is guarded by !VERCEL so it never runs (or bundles into) the core function.
-  import("./server/extension").then(({ registerExtensionRoutes }) => {
+  import("./server/extension.js").then(({ registerExtensionRoutes }) => {
     registerExtensionRoutes(app, ai);
     return setupVite();
   }).then(() => {
