@@ -535,21 +535,25 @@ const ExtensionKeyModal: React.FC<{ defaultProjectId: string | null; onClose: ()
   useEffect(() => { setApiKey(''); setCopied(false); }, [selectedProjectId]);
 
   const revealKey = async () => {
-    if (!user || !selectedProjectId) return;
-    setLoading(true);
     setError('');
+    if (!user) { setError('Not signed in yet — wait a moment and try again.'); return; }
+    if (!selectedProjectId) { setError('Select a project first.'); return; }
+    setLoading(true);
     try {
-      const idToken = await user.getIdToken();
+      // Force-refresh so we never send an empty/stale token (the cause of the
+      // backend's "Missing ID token" when auth wasn't fully ready).
+      const idToken = await user.getIdToken(true);
+      if (!idToken) throw new Error('Could not get an auth token. Try signing out and back in.');
       const res = await fetch('/api/extension/issue-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ projectId: selectedProjectId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to issue key.');
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
       setApiKey(data.key);
     } catch (e: any) {
-      setError(e.message || 'Failed to issue key.');
+      setError(e?.message || 'Failed to issue key.');
     } finally {
       setLoading(false);
     }
@@ -620,7 +624,7 @@ const ExtensionKeyModal: React.FC<{ defaultProjectId: string | null; onClose: ()
         ) : (
           <button
             onClick={revealKey}
-            disabled={loading || !selectedProjectId}
+            disabled={loading || !selectedProjectId || !user}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary/90 hover:bg-primary text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <KeyRound className="h-4 w-4" />
