@@ -89,7 +89,9 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
         tokenName = (decoded.name as string) ?? "";
       } catch (e: any) {
         console.error("[extension/issue-key] token verification failed:", e?.message ?? e);
-        return res.status(401).json({ error: "Invalid ID token" });
+        // Surface the reason (e.g. an aud/project mismatch) so it's debuggable
+        // from the API response, not only the runtime logs.
+        return res.status(401).json({ error: `Invalid ID token — ${e?.message ?? "verification failed"}` });
       }
 
       const projectId = req.body?.projectId;
