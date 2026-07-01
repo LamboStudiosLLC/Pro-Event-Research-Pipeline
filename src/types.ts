@@ -59,7 +59,7 @@ export interface ResearchCueItem {
   isSandbox?: boolean;
 }
 
-export type Mode = 'browse' | 'research' | 'pipeline' | 'admin';
+export type Mode = 'browse' | 'research' | 'pipeline' | 'admin' | 'templates' | 'leaderboard';
 
 export type UserRole = 'salesperson' | 'admin';
 
@@ -84,4 +84,5 @@ export interface ClaimedLead {
   claimedAt: any;
   status: 'Initial' | 'Contacted' | 'Responded';
   responseOutcome?: ResponseOutcome | null;
+  contactedAt?: any;
 }

@@ -14,6 +14,8 @@ import {
   Trash2,
   Shield,
   Pencil,
+  FileText,
+  Trophy,
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -177,21 +179,51 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
       </div>
 
       <div className="flex items-center gap-6 h-full">
-        {isAdmin && (
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setMode('admin')}
+            onClick={() => setMode('leaderboard')}
             className={cn(
               "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
-              mode === 'admin'
+              mode === 'leaderboard'
                 ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
                 : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white"
             )}
           >
-            <Shield className="h-3.5 w-3.5" />
-            Admin Dashboard
+            <Trophy className="h-3.5 w-3.5" />
+            Leaderboard
           </button>
-        )}
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => setMode('templates')}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
+                  mode === 'templates'
+                    ? "bg-sky-500/20 text-sky-400 border-sky-500/30"
+                    : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white"
+                )}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Templates
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('admin')}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer",
+                  mode === 'admin'
+                    ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                    : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10 hover:text-white"
+                )}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                Admin Dashboard
+              </button>
+            </>
+          )}
+        </div>
 
         <div ref={projectRef} className="relative h-full flex items-center">
           <button

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  collection, addDoc, deleteDoc, doc, onSnapshot, serverTimestamp, getDocs,
+  collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -55,10 +55,14 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
   }, [uid]);
 
   // One-time migration of any templates previously stored in localStorage.
+  // This hook runs in every PipelineCard, so claim the flag SYNCHRONOUSLY before
+  // any async write — otherwise all mounted cards migrate at once and create
+  // duplicates (the cause of the "same template x26" bug).
   useEffect(() => {
     if (!uid || localStorage.getItem(MIGRATION_FLAG)) return;
+    localStorage.setItem(MIGRATION_FLAG, '1');
     const stored = localStorage.getItem('email_templates');
-    if (!stored) { localStorage.setItem(MIGRATION_FLAG, '1'); return; }
+    if (!stored) return;
     (async () => {
       try {
         const arr = JSON.parse(stored) as Array<{ id?: string; name?: string; text?: string }>;
@@ -68,7 +72,6 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
             name: t.name, text: t.text, createdAt: serverTimestamp(),
           })
         ));
-        localStorage.setItem(MIGRATION_FLAG, '1');
       } catch (e) {
         console.error('Template migration failed:', e);
       }
@@ -94,6 +97,15 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
     return ref.id;
   }, [uid, isAdmin]);
 
+  const updateTemplate = useCallback(async (tpl: EmailTemplate, fields: { name: string; text: string }) => {
+    if (tpl.scope === 'default' || !uid) return;
+    if (tpl.scope === 'shared') {
+      await updateDoc(doc(db, 'shared_templates', tpl.id), fields);
+    } else {
+      await updateDoc(doc(db, 'users', uid, 'templates', tpl.id), fields);
+    }
+  }, [uid]);
+
   const deleteTemplate = useCallback(async (tpl: EmailTemplate) => {
     if (tpl.scope === 'default' || !uid) return;
     if (tpl.scope === 'shared') {
@@ -103,12 +115,12 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
     }
   }, [uid]);
 
-  // Whether the current user may delete a given template.
-  const canDelete = useCallback((tpl: EmailTemplate) => {
+  // Whether the current user may edit/delete a given template.
+  const canEdit = useCallback((tpl: EmailTemplate) => {
     if (tpl.scope === 'default') return false;
     if (tpl.scope === 'shared') return isAdmin;
     return true; // personal templates are the user's own
   }, [isAdmin]);
 
-  return { templates, createTemplate, deleteTemplate, canDelete };
+  return { templates, createTemplate, updateTemplate, deleteTemplate, canDelete: canEdit, canEdit };
 }
