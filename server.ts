@@ -351,13 +351,13 @@ function generateLocalVariations(text: string): string[] {
         ? availableSuffixes[i % availableSuffixes.length] 
         : " Best regards.";
 
+      // Append to the last NON-EMPTY line so the suffix reads as a natural
+      // closing at the end, instead of jamming onto the second-to-last line.
       const lines = current.split('\n');
-      if (lines.length > 2) {
-        lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
-        current = lines.join('\n');
-      } else {
-        current = current + "\n" + selectedSuffix;
-      }
+      let li = lines.length - 1;
+      while (li > 0 && lines[li].trim() === '') li--;
+      lines[li] = lines[li] + selectedSuffix;
+      current = lines.join('\n');
     }
 
     variations.push(cleanSentenceDuplications(current));

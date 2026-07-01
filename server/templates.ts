@@ -38,7 +38,10 @@ function extractMonth(dateStr: string): string {
   for (const m of MONTHS) {
     if (new RegExp(m, "i").test(dateStr)) return m;
   }
-  const d = new Date(dateStr + (dateStr.match(/^\d{4}-\d{2}-\d{2}$/) ? "T00:00:00" : ""));
+  // Handle ranges like "2026-08-04 – 2026-08-06" by taking the first ISO date.
+  const iso = dateStr.match(/\d{4}-\d{2}-\d{2}/);
+  const candidate = iso ? iso[0] : dateStr;
+  const d = new Date(candidate + (/^\d{4}-\d{2}-\d{2}$/.test(candidate) ? "T00:00:00" : ""));
   if (!isNaN(d.getTime())) return d.toLocaleDateString("en-US", { month: "long" });
   return dateStr;
 }

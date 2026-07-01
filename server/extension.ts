@@ -294,7 +294,9 @@ ${interpolated}`;
           { eventName: d.data().eventName, website: d.data().website }
         )
       );
-      await Promise.all(matches.map((d) => d.ref.update({ status: "Contacted", responseOutcome: null })));
+      // Stamp contactedAt so the weekly leaderboard can count this outreach.
+      const contactedAt = new Date();
+      await Promise.all(matches.map((d) => d.ref.update({ status: "Contacted", responseOutcome: null, contactedAt })));
 
       res.json({ ok: true });
     } catch (err: any) {

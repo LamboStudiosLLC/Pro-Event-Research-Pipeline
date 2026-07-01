@@ -345,7 +345,12 @@ const PipelineMode: React.FC<PipelineModeProps> = ({ activeProjectId }) => {
       return;
     }
     const event = events.find(e => e.eventId === eventId);
-    if (event) await syncClaimedLeadStatus(event, { status: newStatus, responseOutcome: newStatus !== 'Responded' ? null : event.responseOutcome ?? null });
+    if (event) {
+      const syncFields: any = { status: newStatus, responseOutcome: newStatus !== 'Responded' ? null : event.responseOutcome ?? null };
+      // Stamp when a lead is contacted so the weekly leaderboard can count it.
+      if (newStatus === 'Contacted') syncFields.contactedAt = serverTimestamp();
+      await syncClaimedLeadStatus(event, syncFields);
+    }
   };
 
   const updateResponseOutcome = async (eventId: string, outcome: ResponseOutcome | null) => {

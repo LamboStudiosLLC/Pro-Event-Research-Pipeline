@@ -7,6 +7,8 @@ import ResearchMode from '@/src/components/ResearchMode';
 import BrowseMode from '@/src/components/BrowseMode';
 import PipelineMode from '@/src/components/PipelineMode';
 import AdminMode from '@/src/components/AdminMode';
+import TemplatesMode from '@/src/components/TemplatesMode';
+import LeaderboardMode from '@/src/components/LeaderboardMode';
 import { motion } from 'motion/react';
 import { LogIn, Zap } from 'lucide-react';
 import { signInWithGoogle } from '@/src/lib/firebase';
@@ -92,6 +94,20 @@ const AppContent = () => {
             mode === 'admin' ? "opacity-100 scale-100 z-10 pointer-events-auto" : "opacity-0 scale-95 z-0 pointer-events-none"
           )}>
             <AdminMode activeProjectId={activeProjectId} />
+          </div>
+
+          <div className={cn(
+            "flex-1 overflow-auto custom-scrollbar flex flex-col transition-all duration-300 absolute inset-6",
+            mode === 'templates' ? "opacity-100 scale-100 z-10 pointer-events-auto" : "opacity-0 scale-95 z-0 pointer-events-none"
+          )}>
+            <TemplatesMode />
+          </div>
+
+          <div className={cn(
+            "flex-1 overflow-auto custom-scrollbar flex flex-col transition-all duration-300 absolute inset-6",
+            mode === 'leaderboard' ? "opacity-100 scale-100 z-10 pointer-events-auto" : "opacity-0 scale-95 z-0 pointer-events-none"
+          )}>
+            <LeaderboardMode />
           </div>
         </div>
       </main>

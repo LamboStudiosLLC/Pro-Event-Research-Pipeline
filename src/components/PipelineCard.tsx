@@ -144,13 +144,13 @@ const generateLocalVariationsClient = (text: string): string[] => {
           ? availableSuffixes[i % availableSuffixes.length]
           : " Best regards.";
 
+      // Append to the last NON-EMPTY line so the suffix reads as a natural
+      // closing at the end, instead of jamming onto the second-to-last line.
       const lines = current.split("\n");
-      if (lines.length > 2) {
-        lines[lines.length - 2] = lines[lines.length - 2] + selectedSuffix;
-        current = lines.join("\n");
-      } else {
-        current = current + "\n" + selectedSuffix;
-      }
+      let li = lines.length - 1;
+      while (li > 0 && lines[li].trim() === "") li--;
+      lines[li] = lines[li] + selectedSuffix;
+      current = lines.join("\n");
     }
     variations.push(current);
   }
@@ -308,28 +308,19 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const [copiedDraft, setCopiedDraft] = useState(false);
   const { user, profile } = useFirebase();
   const isAdmin = profile?.role === 'admin';
-  const { templates, createTemplate, deleteTemplate, canDelete } = useTemplates(user?.uid, isAdmin);
+  // Templates are read-only here — reps select and send; management lives in the
+  // admin-only Templates tab.
+  const { templates } = useTemplates(user?.uid, isAdmin);
   // Per-session cache of generated copy variations + rotation index, keyed by
   // template id. Kept out of Firestore since it's ephemeral, per-browser state.
   const [variationsCache, setVariationsCache] = useState<Record<string, { variations: string[]; index: number }>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [isSavingTemplateMode, setIsSavingTemplateMode] = useState(false);
-  const [shareWithAll, setShareWithAll] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState("");
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
   const [isContactSelectorOpen, setIsContactSelectorOpen] = useState(false);
   const [selectedComposeContact, setSelectedComposeContact] = useState<any>(null);
   const [isMailClientSelectorOpen, setIsMailClientSelectorOpen] = useState(false);
   const [preferredMailClient, setPreferredMailClient] = useState<string | null>(() => localStorage.getItem("preferred_mail_client"));
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
-
-  const handleDeleteTemplate = (tpl: EmailTemplate) => {
-    deleteTemplate(tpl);
-    if (selectedTemplateId === tpl.id) {
-      setSelectedTemplateId("");
-      setEmailText("");
-    }
-  };
 
   const extractMonth = (dateStr: string): string => {
     if (!dateStr) return "upcoming month";
@@ -342,7 +333,10 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
         return m;
       }
     }
-    const d = new Date(dateStr + (dateStr.match(/^\d{4}-\d{2}-\d{2}$/) ? 'T00:00:00' : ''));
+    // Handle ranges like "2026-08-04 – 2026-08-06" by taking the first ISO date.
+    const iso = dateStr.match(/\d{4}-\d{2}-\d{2}/);
+    const candidate = iso ? iso[0] : dateStr;
+    const d = new Date(candidate + (/^\d{4}-\d{2}-\d{2}$/.test(candidate) ? 'T00:00:00' : ''));
     if (!isNaN(d.getTime())) {
       return d.toLocaleDateString('en-US', { month: 'long' });
     }
@@ -445,55 +439,6 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
       setIsContactSelectorOpen(true);
     } else {
       applyTemplateForContact(id, null);
-    }
-  };
-
-  const handleConfirmSaveTemplate = async () => {
-    if (!newTemplateName.trim()) {
-      alert("Please enter a template name.");
-      return;
-    }
-    if (!emailText.trim()) {
-      alert("Please enter some text in the composer to save as a template.");
-      return;
-    }
-
-    const templateText = emailText;
-    const templateName = newTemplateName.trim();
-    const shared = shareWithAll && isAdmin;
-    setIsSavingTemplateMode(false);
-    setNewTemplateName("");
-    setShareWithAll(false);
-
-    try {
-      const newId = await createTemplate(templateName, templateText, shared, userDisplayName || "");
-      if (newId) setSelectedTemplateId(newId);
-      // Seed the rotation cache so it's usable immediately, then enrich via LLM.
-      if (newId) {
-        setVariationsCache((prev) => ({
-          ...prev,
-          [newId]: { variations: generateLocalVariationsClient(templateText), index: 0 },
-        }));
-        try {
-          const response = await fetch("/api/email-variations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: templateText }),
-          });
-          const data = await response.json();
-          if (data.variations && Array.isArray(data.variations) && data.variations.length >= 2) {
-            setVariationsCache((prev) => ({
-              ...prev,
-              [newId]: { variations: data.variations, index: prev[newId]?.index ?? 0 },
-            }));
-          }
-        } catch (err) {
-          console.error("Failed to generate LLM variations, using local fallback:", err);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to save template:", err);
-      alert("Failed to save template. Please try again.");
     }
   };
 
@@ -1086,20 +1031,6 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                                     <span className="text-[7px] uppercase tracking-wider font-bold text-slate-400 bg-white/5 border border-white/10 rounded px-1 py-px shrink-0">Default</span>
                                   )}
                                 </span>
-                                {canDelete(tpl) && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (tpl.scope === 'shared' && !confirm(`Delete shared template "${tpl.name}" for ALL salespeople?`)) return;
-                                      handleDeleteTemplate(tpl);
-                                    }}
-                                    className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold"
-                                    title={tpl.scope === 'shared' ? "Delete shared template" : "Delete template"}
-                                  >
-                                    ✕
-                                  </button>
-                                )}
                               </div>
                             ))
                           )}
@@ -1108,69 +1039,15 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                     )}
                   </div>
 
-                  {/* Save As Template actions */}
-                  <div className="flex items-center gap-1.5">
-                    {isSavingTemplateMode ? (
-                      <div className="flex items-center bg-black/60 border border-white/10 rounded px-1.5 py-0.5 gap-1.5 min-w-[180px]">
-                        <input
-                          type="text"
-                          placeholder="Template Name..."
-                          value={newTemplateName}
-                          onChange={(e) => setNewTemplateName(e.target.value)}
-                          className="bg-transparent border-none text-[9px] text-white focus:outline-none w-[90px] font-sans"
-                        />
-                        {isAdmin && (
-                          <label className="flex items-center gap-1 text-[8px] text-slate-300 cursor-pointer select-none shrink-0" title="Make this template available to all salespeople">
-                            <input
-                              type="checkbox"
-                              checked={shareWithAll}
-                              onChange={(e) => setShareWithAll(e.target.checked)}
-                              className="h-2.5 w-2.5 accent-sky-500 cursor-pointer"
-                            />
-                            Share all
-                          </label>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleConfirmSaveTemplate}
-                          className="px-2 py-0.5 bg-primary hover:bg-secondary text-slate-900 font-bold rounded text-[8px] cursor-pointer"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsSavingTemplateMode(false);
-                            setNewTemplateName("");
-                            setShareWithAll(false);
-                          }}
-                          className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-400 rounded text-[8px] cursor-pointer"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setIsSavingTemplateMode(true)}
-                        className="px-2.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-350 border border-white/10 rounded text-[9.5px] font-bold cursor-pointer transition-all hover:text-white"
-                      >
-                        Save As Template
-                      </button>
-                    )}
-                  </div>
                 </div>
 
                 {/* Body Composition space - utilizes the full remaining height of the container */}
                 <div className="relative select-text flex-grow flex flex-col min-h-[180px] md:min-h-[220px]">
                   <textarea
                     value={emailText}
-                    onChange={(e) => {
-                      setEmailText(e.target.value);
-                      setSelectedTemplateId(""); // clear selected if they edit
-                    }}
-                    placeholder="Write or paste your email outreach draft here, or select a template from the dropdown menu to auto-fill placeholders like [Event Name], [Contact Name], [Month], or [Location]..."
-                    className="w-full flex-grow bg-black/50 border border-white/5 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary/40 h-full custom-scrollbar font-sans select-text leading-relaxed resize-none scrollbar-thin"
+                    readOnly
+                    placeholder="Select a template and a recipient above — it will auto-fill here, ready to copy and send. Templates are managed by admins in the Templates tab."
+                    className="w-full flex-grow bg-black/50 border border-white/5 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none h-full custom-scrollbar font-sans select-text leading-relaxed resize-none scrollbar-thin cursor-default"
                   />
                 </div>
 
