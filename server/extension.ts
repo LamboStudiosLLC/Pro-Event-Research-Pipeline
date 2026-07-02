@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import type { Query } from "firebase-admin/firestore";
 import type { GoogleGenAI } from "@google/genai";
-import { getAdminDb, getAdminAuth } from "./firebaseAdmin.js";
+import { getAdminDb } from "./firebaseAdmin.js";
+import { verifyFirebaseIdToken } from "./verifyIdToken.js";
 import { resolveExtensionAuth, extensionCors } from "./extensionAuth.js";
 import { BUILT_IN_TEMPLATE, DEFAULT_SUBJECT, applyReplacements, type ExtensionTemplate } from "./templates.js";
 import { isLeadMatch } from "../src/lib/leadMatching.js";
@@ -83,10 +84,9 @@ export function registerExtensionRoutes(app: Express, ai: GoogleGenAI) {
       let uid: string;
       let tokenName = "";
       try {
-        const adminAuth = await getAdminAuth();
-        const decoded = await adminAuth.verifyIdToken(idToken);
+        const decoded = await verifyFirebaseIdToken(idToken);
         uid = decoded.uid;
-        tokenName = (decoded.name as string) ?? "";
+        tokenName = decoded.name ?? "";
       } catch (e: any) {
         console.error("[extension/issue-key] token verification failed:", e?.message ?? e);
         // Surface the reason (e.g. an aud/project mismatch) so it's debuggable
