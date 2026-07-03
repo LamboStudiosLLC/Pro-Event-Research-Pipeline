@@ -259,6 +259,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
   const [importProgress, setImportProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
+  const [importType, setImportType] = useState<'event' | 'vendor'>('event');
 
   const minPct = (minAttendance - 10) / (150000 - 10);
   const maxPct = (maxAttendance - 10) / (150000 - 10);
@@ -498,24 +499,37 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
 
       const parsed: ParsedImportRow[] = raw
         .map(row => {
-          const eventName = get(row, 'Event Name', 'Name', 'Title', 'Event');
+          const isVendor = importType === 'vendor';
+          const eventName = isVendor
+            ? get(row, 'Vendor Name', 'Name', 'Title', 'Event')
+            : get(row, 'Event Name', 'Name', 'Title', 'Event');
           if (!eventName) return null;
 
-          const website = get(row, 'Event Website', 'Organizer Website', 'Website', 'URL', 'Site');
-          const categories = get(row, 'Event Categories', 'Categories', 'Sector', 'Industry');
-          const eventType = get(row, 'Event Type', 'Type');
+          const website = isVendor
+            ? get(row, 'Vendor Website', 'Website', 'URL', 'Site')
+            : get(row, 'Event Website', 'Organizer Website', 'Website', 'URL', 'Site');
+          const categories = isVendor
+            ? get(row, 'Vendor Categories', 'Categories', 'Sector', 'Industry')
+            : get(row, 'Event Categories', 'Categories', 'Sector', 'Industry');
+          const eventType = isVendor ? '' : get(row, 'Event Type', 'Type');
           const servicesOffered = [categories, eventType].filter(Boolean).join(' · ')
             || get(row, 'Description', 'Services', 'Focus', 'servicesOffered');
 
-          const startRaw = get(row, 'Start Date', 'Forecasted Start Date', 'Date', 'Start');
-          const endRaw = get(row, 'End Date', 'Forecasted End Date', 'End');
-          // Strip time component if present (xlsx with cellDates gives ISO strings)
-          const fmt = (s: string) => s.includes('T') ? s.split('T')[0] : s;
-          const date = startRaw && endRaw && fmt(startRaw) !== fmt(endRaw)
-            ? `${fmt(startRaw)} – ${fmt(endRaw)}`
-            : fmt(startRaw);
+          // Vendors are companies, not dated events — no start/end dates
+          let date = '';
+          if (!isVendor) {
+            const startRaw = get(row, 'Start Date', 'Forecasted Start Date', 'Date', 'Start');
+            const endRaw = get(row, 'End Date', 'Forecasted End Date', 'End');
+            // Strip time component if present (xlsx with cellDates gives ISO strings)
+            const fmt = (s: string) => s.includes('T') ? s.split('T')[0] : s;
+            date = startRaw && endRaw && fmt(startRaw) !== fmt(endRaw)
+              ? `${fmt(startRaw)} – ${fmt(endRaw)}`
+              : fmt(startRaw);
+          }
 
-          const city = get(row, 'City', 'Location');
+          const city = isVendor
+            ? get(row, 'Headquarters City', 'City', 'Location')
+            : get(row, 'City', 'Location');
           const country = get(row, 'Country');
           const location = [city, country].filter(Boolean).join(', ')
             || get(row, 'Venue Address', 'Address', 'Region');
@@ -528,7 +542,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             isLeadMatch({ eventName, website }, { eventName: cl.eventName, website: cl.website })
           );
 
-          return { eventName, website, servicesOffered, location, date, contactName, contactEmail, contactRole, searchType: 'event' as const, isDuplicate };
+          return { eventName, website, servicesOffered, location, date, contactName, contactEmail, contactRole, searchType: importType, isDuplicate };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null) as ParsedImportRow[];
 
@@ -1088,6 +1102,27 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
             <div className="flex-1 flex flex-col overflow-hidden">
             {importStatus === 'idle' && (
               <div className="flex flex-col gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">File Contains</label>
+                  <div className="grid grid-cols-2 gap-1 bg-zinc-950/45 p-1 rounded-xl border border-white/5 max-w-xs">
+                    {(['event', 'vendor'] as const).map(t => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setImportType(t)}
+                        className={cn(
+                          "py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all border",
+                          importType === t
+                            ? "bg-gradient-to-b from-zinc-700 via-zinc-800 to-zinc-900 border-t-white/75 border-x-white/20 border-b-black/80 text-white shadow-[0_4px_6px_rgba(0,0,0,0.5),_inset_0_1px_0_rgba(255,255,255,0.4)]"
+                            : "bg-gradient-to-b from-zinc-900 to-zinc-950 border-white/5 text-slate-400 hover:text-slate-200"
+                        )}
+                      >
+                        {t === 'event' ? <Calendar className="h-3.5 w-3.5" /> : <Briefcase className="h-3.5 w-3.5" />}
+                        <span className="capitalize">{t === 'event' ? 'Events' : 'Vendors'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div
                   onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                   onDragLeave={() => setIsDragging(false)}
@@ -1136,17 +1171,27 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                       <p>The first row must be a header row. Column names are flexible — the importer recognises common variations. Required columns are marked <span className="text-white font-semibold">bold</span>.</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
                         <div>
-                          <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Event</p>
-                          <ul className="space-y-1">
-                            <li><span className="text-white font-semibold">Event Name</span> — or <span className="font-mono bg-white/5 px-1 rounded">Name</span>, <span className="font-mono bg-white/5 px-1 rounded">Title</span>, <span className="font-mono bg-white/5 px-1 rounded">Event</span></li>
-                            <li><span className="text-slate-300">Event Website</span> — or <span className="font-mono bg-white/5 px-1 rounded">Website</span>, <span className="font-mono bg-white/5 px-1 rounded">URL</span></li>
-                            <li><span className="text-slate-300">Start Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted Start Date</span>, <span className="font-mono bg-white/5 px-1 rounded">Date</span></li>
-                            <li><span className="text-slate-300">End Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted End Date</span></li>
-                            <li><span className="text-slate-300">City</span> — or <span className="font-mono bg-white/5 px-1 rounded">Location</span></li>
-                            <li><span className="text-slate-300">Country</span></li>
-                            <li><span className="text-slate-300">Event Categories</span> — or <span className="font-mono bg-white/5 px-1 rounded">Categories</span>, <span className="font-mono bg-white/5 px-1 rounded">Sector</span></li>
-                            <li><span className="text-slate-300">Event Type</span> — or <span className="font-mono bg-white/5 px-1 rounded">Type</span></li>
-                          </ul>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">{importType === 'vendor' ? 'Vendor' : 'Event'}</p>
+                          {importType === 'vendor' ? (
+                            <ul className="space-y-1">
+                              <li><span className="text-white font-semibold">Vendor Name</span> — or <span className="font-mono bg-white/5 px-1 rounded">Name</span>, <span className="font-mono bg-white/5 px-1 rounded">Title</span></li>
+                              <li><span className="text-slate-300">Vendor Website</span> — or <span className="font-mono bg-white/5 px-1 rounded">Website</span>, <span className="font-mono bg-white/5 px-1 rounded">URL</span></li>
+                              <li><span className="text-slate-300">Headquarters City</span> — or <span className="font-mono bg-white/5 px-1 rounded">Location</span></li>
+                              <li><span className="text-slate-300">Country</span></li>
+                              <li><span className="text-slate-300">Vendor Categories</span> — or <span className="font-mono bg-white/5 px-1 rounded">Categories</span>, <span className="font-mono bg-white/5 px-1 rounded">Sector</span></li>
+                            </ul>
+                          ) : (
+                            <ul className="space-y-1">
+                              <li><span className="text-white font-semibold">Event Name</span> — or <span className="font-mono bg-white/5 px-1 rounded">Name</span>, <span className="font-mono bg-white/5 px-1 rounded">Title</span>, <span className="font-mono bg-white/5 px-1 rounded">Event</span></li>
+                              <li><span className="text-slate-300">Event Website</span> — or <span className="font-mono bg-white/5 px-1 rounded">Website</span>, <span className="font-mono bg-white/5 px-1 rounded">URL</span></li>
+                              <li><span className="text-slate-300">Start Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted Start Date</span>, <span className="font-mono bg-white/5 px-1 rounded">Date</span></li>
+                              <li><span className="text-slate-300">End Date</span> — or <span className="font-mono bg-white/5 px-1 rounded">Forecasted End Date</span></li>
+                              <li><span className="text-slate-300">City</span> — or <span className="font-mono bg-white/5 px-1 rounded">Location</span></li>
+                              <li><span className="text-slate-300">Country</span></li>
+                              <li><span className="text-slate-300">Event Categories</span> — or <span className="font-mono bg-white/5 px-1 rounded">Categories</span>, <span className="font-mono bg-white/5 px-1 rounded">Sector</span></li>
+                              <li><span className="text-slate-300">Event Type</span> — or <span className="font-mono bg-white/5 px-1 rounded">Type</span></li>
+                            </ul>
+                          )}
                         </div>
                         <div>
                           <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Contact (optional)</p>
@@ -1157,7 +1202,7 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                           </ul>
                         </div>
                       </div>
-                      <p className="text-slate-500">Only <span className="text-white font-semibold">Event Name</span> is required. All other columns are optional — rows missing a name are skipped.</p>
+                      <p className="text-slate-500">Only <span className="text-white font-semibold">{importType === 'vendor' ? 'Vendor Name' : 'Event Name'}</span> is required. All other columns are optional — rows missing a name are skipped.</p>
                     </div>
                   )}
                 </div>
@@ -1202,8 +1247,8 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                           <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider w-6"></th>
                           <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Name</th>
                           <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Website</th>
-                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Location</th>
-                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Date</th>
+                          <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">{importType === 'vendor' ? 'HQ' : 'Location'}</th>
+                          {importType !== 'vendor' && <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Date</th>}
                           <th className="text-left px-3 py-2 text-slate-400 font-bold uppercase tracking-wider">Contact</th>
                         </tr>
                       </thead>
@@ -1219,13 +1264,13 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                             <td className="px-3 py-2 font-medium text-white max-w-[180px] truncate">{row.eventName}</td>
                             <td className="px-3 py-2 text-slate-400 font-mono max-w-[140px] truncate">{row.website.replace(/^https?:\/\/(www\.)?/, '')}</td>
                             <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate">{row.location}</td>
-                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{row.date}</td>
+                            {importType !== 'vendor' && <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{row.date}</td>}
                             <td className="px-3 py-2 text-slate-400 max-w-[130px] truncate">{row.contactName || '—'}</td>
                           </tr>
                         ))}
                         {importRows.length > 50 && (
                           <tr className="border-t border-white/5">
-                            <td colSpan={6} className="px-3 py-2 text-center text-slate-500 italic">
+                            <td colSpan={importType === 'vendor' ? 5 : 6} className="px-3 py-2 text-center text-slate-500 italic">
                               ...and {importRows.length - 50} more rows
                             </td>
                           </tr>
