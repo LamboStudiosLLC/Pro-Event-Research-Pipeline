@@ -87,6 +87,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // App-wide config (e.g. the admin override of the built-in default
+    // template) — readable by any signed-in user, writable by admins.
+    match /app_config/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     match /claimed_leads/{claimId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && incoming().claimedBy == request.auth.uid;

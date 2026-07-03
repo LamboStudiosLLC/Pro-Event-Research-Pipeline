@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useFirebase } from './FirebaseProvider';
 import { useTemplates, EmailTemplate } from '@/src/lib/useTemplates';
 import { cn } from '@/src/lib/utils';
-import { FileText, Plus, Pencil, Trash2, Lock, Users, User as UserIcon } from 'lucide-react';
+import { FileText, Plus, Pencil, Trash2, Lock, Users, User as UserIcon, RotateCcw } from 'lucide-react';
 
 // Placeholders the composer auto-fills from each event/contact when sending.
 const PLACEHOLDERS = ['[Contact Name]', '[Event Name]', '[Vendor Name]', '[Location]', '[Month]', '[Salesperson]'];
@@ -22,7 +22,7 @@ const ScopeBadge: React.FC<{ scope: EmailTemplate['scope'] }> = ({ scope }) => {
 const TemplatesMode: React.FC = () => {
   const { user, profile } = useFirebase();
   const isAdmin = profile?.role === 'admin';
-  const { templates, createTemplate, updateTemplate, deleteTemplate, canEdit } = useTemplates(user?.uid, isAdmin);
+  const { templates, createTemplate, updateTemplate, deleteTemplate, canEdit, defaultOverridden } = useTemplates(user?.uid, isAdmin);
 
   const [editing, setEditing] = useState<EmailTemplate | null>(null);
   const [creating, setCreating] = useState(false);
@@ -131,7 +131,12 @@ const TemplatesMode: React.FC = () => {
           </div>
 
           {editing ? (
-            <p className="text-xs text-slate-500 flex items-center gap-1.5">Scope: <ScopeBadge scope={editing.scope} /></p>
+            <div className="space-y-1">
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">Scope: <ScopeBadge scope={editing.scope} /></p>
+              {editing.scope === 'default' && (
+                <p className="text-[11px] text-amber-400/80">Changes to the default template apply for all salespeople, including the Chrome extension.</p>
+              )}
+            </div>
           ) : (
             <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
               <input type="checkbox" checked={shareWithAll} onChange={e => setShareWithAll(e.target.checked)} className="h-4 w-4 accent-sky-500 cursor-pointer" />
@@ -161,11 +166,21 @@ const TemplatesMode: React.FC = () => {
                   {canEdit(t) && (
                     <>
                       <button onClick={() => startEdit(t)} title="Edit" className="p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button
-                        onClick={() => { if (confirm(`Delete template "${t.name}"${t.scope === 'shared' ? ' for ALL salespeople' : ''}?`)) deleteTemplate(t); }}
-                        title="Delete"
-                        className="p-1.5 rounded-md text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      ><Trash2 className="h-3.5 w-3.5" /></button>
+                      {t.scope === 'default' ? (
+                        defaultOverridden && (
+                          <button
+                            onClick={() => { if (confirm(`Reset "${t.name}" to the original built-in text for ALL salespeople?`)) deleteTemplate(t); }}
+                            title="Reset to original"
+                            className="p-1.5 rounded-md text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                          ><RotateCcw className="h-3.5 w-3.5" /></button>
+                        )
+                      ) : (
+                        <button
+                          onClick={() => { if (confirm(`Delete template "${t.name}"${t.scope === 'shared' ? ' for ALL salespeople' : ''}?`)) deleteTemplate(t); }}
+                          title="Delete"
+                          className="p-1.5 rounded-md text-red-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        ><Trash2 className="h-3.5 w-3.5" /></button>
+                      )}
                     </>
                   )}
                 </div>

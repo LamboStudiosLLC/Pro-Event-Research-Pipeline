@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, serverTimestamp, getDocs,
+  collection, addDoc, deleteDoc, updateDoc, setDoc, doc, onSnapshot, serverTimestamp, getDocs,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -26,12 +26,25 @@ const BUILT_IN: EmailTemplate = {
 
 const MIGRATION_FLAG = 'templates_migrated_v1';
 
+// Admin edits to the default template live in this doc; when absent, the
+// hardcoded BUILT_IN text applies. The extension backend reads the same doc.
+const DEFAULT_OVERRIDE_PATH = ['app_config', 'default_template'] as const;
+
 // Templates a user sees: the built-in default, all shared (admin) templates, and
 // their own personal templates. Personal/shared live in Firestore so they sync
 // across devices and (via the extension backend) into the Chrome extension.
 export function useTemplates(uid: string | undefined, isAdmin: boolean) {
   const [shared, setShared] = useState<EmailTemplate[]>([]);
   const [personal, setPersonal] = useState<EmailTemplate[]>([]);
+  const [defaultOverride, setDefaultOverride] = useState<{ name: string; text: string } | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, ...DEFAULT_OVERRIDE_PATH), snap => {
+      const data = snap.data();
+      setDefaultOverride(data?.name && data?.text ? { name: data.name, text: data.text } : null);
+    }, err => console.error('default template override listen failed:', err));
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'shared_templates'), snap => {
@@ -78,7 +91,11 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
     })();
   }, [uid]);
 
-  const templates: EmailTemplate[] = [BUILT_IN, ...shared, ...personal];
+  const templates: EmailTemplate[] = [
+    defaultOverride ? { ...BUILT_IN, ...defaultOverride } : BUILT_IN,
+    ...shared,
+    ...personal,
+  ];
 
   // Returns the new template's id so the caller can select it immediately.
   const createTemplate = useCallback(async (
@@ -98,29 +115,43 @@ export function useTemplates(uid: string | undefined, isAdmin: boolean) {
   }, [uid, isAdmin]);
 
   const updateTemplate = useCallback(async (tpl: EmailTemplate, fields: { name: string; text: string }) => {
-    if (tpl.scope === 'default' || !uid) return;
-    if (tpl.scope === 'shared') {
+    if (!uid) return;
+    if (tpl.scope === 'default') {
+      if (!isAdmin) return;
+      await setDoc(doc(db, ...DEFAULT_OVERRIDE_PATH), {
+        ...fields, updatedBy: uid, updatedAt: serverTimestamp(),
+      });
+    } else if (tpl.scope === 'shared') {
       await updateDoc(doc(db, 'shared_templates', tpl.id), fields);
     } else {
       await updateDoc(doc(db, 'users', uid, 'templates', tpl.id), fields);
     }
-  }, [uid]);
+  }, [uid, isAdmin]);
 
+  // For the default template, "delete" removes the admin override, restoring
+  // the built-in text; the default itself can never be removed from the list.
   const deleteTemplate = useCallback(async (tpl: EmailTemplate) => {
-    if (tpl.scope === 'default' || !uid) return;
-    if (tpl.scope === 'shared') {
+    if (!uid) return;
+    if (tpl.scope === 'default') {
+      if (!isAdmin) return;
+      await deleteDoc(doc(db, ...DEFAULT_OVERRIDE_PATH));
+    } else if (tpl.scope === 'shared') {
       await deleteDoc(doc(db, 'shared_templates', tpl.id));
     } else {
       await deleteDoc(doc(db, 'users', uid, 'templates', tpl.id));
     }
-  }, [uid]);
+  }, [uid, isAdmin]);
 
   // Whether the current user may edit/delete a given template.
   const canEdit = useCallback((tpl: EmailTemplate) => {
-    if (tpl.scope === 'default') return false;
+    if (tpl.scope === 'default') return isAdmin;
     if (tpl.scope === 'shared') return isAdmin;
     return true; // personal templates are the user's own
   }, [isAdmin]);
 
-  return { templates, createTemplate, updateTemplate, deleteTemplate, canDelete: canEdit, canEdit };
+  return {
+    templates, createTemplate, updateTemplate, deleteTemplate,
+    canDelete: canEdit, canEdit,
+    defaultOverridden: defaultOverride !== null,
+  };
 }

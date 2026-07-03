@@ -8,11 +8,13 @@ import { resolveExtensionAuth, extensionCors } from "./extensionAuth.js";
 import { BUILT_IN_TEMPLATE, DEFAULT_SUBJECT, applyReplacements, type ExtensionTemplate } from "./templates.js";
 import { isLeadMatch } from "../src/lib/leadMatching.js";
 
-// Templates available to an extension user: the built-in default, every shared
+// Templates available to an extension user: the built-in default (with any
+// admin override from app_config/default_template applied), every shared
 // (admin-created) template, and that user's own personal templates.
 async function loadTemplatesForUser(uid: string): Promise<ExtensionTemplate[]> {
   const db = await getAdminDb();
-  const [shared, personal] = await Promise.all([
+  const [override, shared, personal] = await Promise.all([
+    db.collection("app_config").doc("default_template").get(),
     db.collection("shared_templates").get(),
     db.collection("users").doc(uid).collection("templates").get(),
   ]);
@@ -22,7 +24,12 @@ async function loadTemplatesForUser(uid: string): Promise<ExtensionTemplate[]> {
     subject: DEFAULT_SUBJECT,
     text: (d.data().text as string) ?? "",
   });
-  return [BUILT_IN_TEMPLATE, ...shared.docs.map(mapDoc), ...personal.docs.map(mapDoc)];
+  const overrideData = override.exists ? override.data() : undefined;
+  const builtIn: ExtensionTemplate =
+    overrideData?.name && overrideData?.text
+      ? { ...BUILT_IN_TEMPLATE, name: overrideData.name as string, text: overrideData.text as string }
+      : BUILT_IN_TEMPLATE;
+  return [builtIn, ...shared.docs.map(mapDoc), ...personal.docs.map(mapDoc)];
 }
 
 // Vance's pipeline uses a 3-state status; the extension UI speaks the original
