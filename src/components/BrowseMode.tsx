@@ -1239,6 +1239,18 @@ export default function BrowseMode({ activeProjectId, setMode }: BrowseModeProps
                     </div>
                   </div>
 
+                  {importRows.length === 0 && (
+                    <div className="flex items-start gap-2.5 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl shrink-0">
+                      <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-slate-300">
+                        No rows were found. Check that the first row of your file is a header row and includes a{' '}
+                        <span className="font-mono bg-white/5 px-1 rounded">{importType === 'vendor' ? 'Vendor Name' : 'Event Name'}</span> or{' '}
+                        <span className="font-mono bg-white/5 px-1 rounded">Name</span> column — rows without a name are skipped.
+                        Header names are case-sensitive; see the CSV / XLSX Format Guide for accepted columns.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Preview table */}
                   <div className="flex-1 overflow-auto custom-scrollbar rounded-xl border border-white/10">
                     <table className="w-full text-[10px]">
