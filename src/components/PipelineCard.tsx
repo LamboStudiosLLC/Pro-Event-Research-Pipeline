@@ -305,7 +305,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [emailText, setEmailText] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
   const [copiedDraft, setCopiedDraft] = useState(false);
+  const [copiedSubject, setCopiedSubject] = useState(false);
   const { user, profile } = useFirebase();
   const isAdmin = profile?.role === 'admin';
   // Templates are read-only here — reps select and send; management lives in the
@@ -365,7 +367,8 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const applyReplacementsForContact = (tplText: string, contact: any) => {
     let text = tplText;
     const nameVal = event.eventName;
-    const salespersonName = userDisplayName || "Sales Representative";
+    // [Salesperson] inserts the rep's FIRST name only.
+    const salespersonFirst = (userDisplayName || "Sales Representative").trim().split(/\s+/)[0];
     const contactNameVal = contact?.name || "Team";
     const locationVal = extractCity(event.location || "your area");
     const monthVal = extractMonth(event.date || "");
@@ -376,10 +379,11 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     text = text.replace(/\[Event\]/gi, nameVal);
     text = text.replace(/\[Vendor\]/gi, nameVal);
 
-    text = text.replace(/\[Salesperson\]/gi, salespersonName);
+    text = text.replace(/\[Salesperson\]/gi, salespersonFirst);
     text = text.replace(/\[Contact Name\]/gi, contactNameVal);
     text = text.replace(/\[Location\]/gi, locationVal);
     text = text.replace(/\[Month\]/gi, monthVal);
+    text = text.replace(/\[Website\]/gi, "druid-productions.com");
 
     return text;
   };
@@ -397,6 +401,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     const rawText = currentVars[idx % currentVars.length];
     const resolved = applyReplacementsForContact(rawText, contact);
     setEmailText(resolved);
+    setEmailSubject(applyReplacementsForContact(found.subject || "", contact));
     setSelectedComposeContact(contact);
 
     // Advance the rotation for next time.
@@ -430,6 +435,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     setSelectedTemplateId(id);
     if (!id) {
       setEmailText("");
+      setEmailSubject("");
       setSelectedComposeContact(null);
       return;
     }
@@ -442,16 +448,39 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
     }
   };
 
-  const handleCopyText = () => {
+  const handleCopyText = async () => {
     if (!emailText) return;
-    navigator.clipboard.writeText(emailText);
-    setCopiedDraft(true);
-    setTimeout(() => setCopiedDraft(false), 2000);
+    const flash = () => { setCopiedDraft(true); setTimeout(() => setCopiedDraft(false), 2000); };
+
+    // Build an HTML version so URLs (e.g. druid-productions.com) paste into Gmail
+    // as real clickable links, while keeping a plain-text fallback.
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const linkify = (s: string) =>
+      s.replace(/\b(https?:\/\/[^\s<]+|www\.[^\s<]+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|co|us|tech)(?:\/[^\s<]*)?)/gi, (url) => {
+        const trail = (url.match(/[.,;:!?)]+$/) || [""])[0];
+        const clean = trail ? url.slice(0, -trail.length) : url;
+        const href = /^https?:\/\//i.test(clean) ? clean : `https://${clean}`;
+        return `<a href="${href}">${clean}</a>${trail}`;
+      });
+    const html = linkify(esc(emailText)).replace(/\n/g, "<br>");
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([emailText], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      flash();
+    } catch {
+      // Older browsers / no rich-clipboard support — fall back to plain text.
+      navigator.clipboard.writeText(emailText).then(flash).catch(() => {});
+    }
   };
 
   const launchEmailClient = (clientKey: string) => {
     const toEmail = selectedComposeContact?.email || "";
-    const subject = `Outreach - ${event.eventName}`;
+    const subject = emailSubject || `Outreach - ${event.eventName}`;
     
     // Remember preference if checkbox checked
     const checkbox = document.getElementById(`remember_email_choice_${event.eventId}`) as HTMLInputElement;
@@ -959,6 +988,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                               const idx = cached?.index ?? 0;
                               const rawText = vars[idx % vars.length];
                               setEmailText(applyReplacementsForContact(rawText, contact));
+                              setEmailSubject(applyReplacementsForContact(found.subject || "", contact));
                             }
                           }
                         }}
@@ -1041,6 +1071,24 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
 
                 </div>
 
+                {/* Subject line (read-only, filled from the template) */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-slate-500 shrink-0">Subject:</span>
+                  <input
+                    value={emailSubject}
+                    readOnly
+                    placeholder="Filled from the selected template"
+                    className="flex-1 bg-black/50 border border-white/5 rounded px-2.5 py-1 text-xs text-slate-200 placeholder-slate-600 focus:outline-none select-text cursor-default"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { if (emailSubject) { navigator.clipboard.writeText(emailSubject); setCopiedSubject(true); setTimeout(() => setCopiedSubject(false), 1500); } }}
+                    className="shrink-0 px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-[10px] text-slate-300 transition-colors"
+                  >
+                    {copiedSubject ? "✓" : "Copy"}
+                  </button>
+                </div>
+
                 {/* Body Composition space - utilizes the full remaining height of the container */}
                 <div className="relative select-text flex-grow flex flex-col min-h-[180px] md:min-h-[220px]">
                   <textarea
@@ -1056,7 +1104,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                   <div className="text-[8px] text-slate-500 font-mono">
                     Placeholders supported:{" "}
                     <span className="text-primary font-bold">
-                      [Event Name], [Contact Name], [Month], [Location], [Salesperson]
+                      [Event Name], [Contact Name], [Month], [Location], [Salesperson], [Website]
                     </span>
                   </div>
 
