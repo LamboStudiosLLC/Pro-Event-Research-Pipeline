@@ -305,6 +305,14 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   // Cue Selection Scan Mode States
   const [cueSelectModeActive, setCueSelectModeActive] = useState(false);
   const [selectedCueItems, setSelectedCueItems] = useState<ResearchCueItem[]>([]);
+
+  // List Selection Mode States (Cue, Scans, Pipeline)
+  const [listSelectMode, setListSelectMode] = useState(false);
+  const [selectedListItems, setSelectedListItems] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedListItems([]);
+  }, [leftActiveTab]);
   
   const filteredCue = researchCue.filter(cue => 
     !cue?.eventName || !savedEvents.some(saved => saved?.eventName?.toLowerCase() === cue.eventName.toLowerCase())
@@ -369,6 +377,332 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     });
     return () => unsubscribe();
   }, [user]);
+
+  const handleToggleListItem = (id: string) => {
+    setSelectedListItems(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(x => x !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  };
+
+  const handleSelectAllListItems = () => {
+    let ids: string[] = [];
+    if (leftActiveTab === 'cue') {
+      ids = filteredCue.map(c => c.cueId);
+    } else if (leftActiveTab === 'scans') {
+      ids = filteredScans.map(s => s.scanId);
+    } else if (leftActiveTab === 'pipeline') {
+      ids = savedEvents.map(e => e.eventId);
+    }
+    setSelectedListItems(ids);
+  };
+
+  const handleDeselectAllListItems = () => {
+    setSelectedListItems([]);
+  };
+
+  const handleBulkMoveToPipeline = async () => {
+    if (!user || !activeProjectId || selectedListItems.length === 0) return;
+
+    if (!confirm(`Are you sure you want to move the ${selectedListItems.length} selected items to the Pipeline?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      for (const itemId of selectedListItems) {
+        let itemToSave: any = null;
+        if (leftActiveTab === 'cue') {
+          const cueItem = researchCue.find(c => c.cueId === itemId);
+          if (cueItem) {
+            itemToSave = {
+              eventName: cueItem.eventName,
+              website: cueItem.website || '',
+              date: '',
+              location: '',
+              description: '',
+              contacts: [],
+              searchType: cueItem.searchType || 'event',
+              isSandbox: cueItem.isSandbox || false,
+            };
+          }
+        } else if (leftActiveTab === 'scans') {
+          itemToSave = scannedList.find(s => s.scanId === itemId);
+        }
+
+        if (itemToSave) {
+          const eventId = Math.random().toString(36).substr(2, 9);
+          await setDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventId), {
+            ...itemToSave,
+            eventId: eventId,
+            projectId: activeProjectId,
+            userId: user.uid,
+            notes: itemToSave.notes || '',
+            status: 'Initial',
+            createdAt: serverTimestamp()
+          });
+
+          // Delete from scans
+          const scanInList = scannedList.find(s => s.eventName.toLowerCase() === itemToSave.eventName.toLowerCase());
+          if (scanInList) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'scans', scanInList.scanId));
+          }
+
+          // Delete from cue
+          const cueItem = researchCue.find(c => c.eventName.toLowerCase() === itemToSave.eventName.toLowerCase());
+          if (cueItem) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', cueItem.cueId));
+          }
+        }
+      }
+      setSelectedListItems([]);
+      setListSelectMode(false);
+    } catch (e) {
+      console.error(e);
+      alert("Error moving items to pipeline");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkTransferLeads = async (targetProjId: string, targetProjName: string) => {
+    if (!user || !activeProjectId || selectedListItems.length === 0) return;
+
+    if (!confirm(`Are you sure you want to transfer ${selectedListItems.length} selected items to project "${targetProjName}"?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      for (const itemId of selectedListItems) {
+        let itemToTransfer: any = null;
+        let eventIdToDelete: string | null = null;
+        let scanIdToDelete: string | null = null;
+        let cueIdToDelete: string | null = null;
+
+        if (leftActiveTab === 'cue') {
+          const cueItem = researchCue.find(c => c.cueId === itemId);
+          if (cueItem) {
+            itemToTransfer = {
+              eventName: cueItem.eventName,
+              website: cueItem.website || '',
+              date: '',
+              location: '',
+              description: '',
+              contacts: [],
+              searchType: cueItem.searchType || 'event',
+              isSandbox: cueItem.isSandbox || false,
+            };
+            cueIdToDelete = cueItem.cueId;
+            const scanInList = scannedList.find(s => s.eventName.toLowerCase() === cueItem.eventName.toLowerCase());
+            if (scanInList) scanIdToDelete = scanInList.scanId;
+          }
+        } else if (leftActiveTab === 'scans') {
+          const scanItem = scannedList.find(s => s.scanId === itemId);
+          if (scanItem) {
+            itemToTransfer = scanItem;
+            scanIdToDelete = scanItem.scanId;
+            const cueItem = researchCue.find(c => c.eventName.toLowerCase() === scanItem.eventName.toLowerCase());
+            if (cueItem) cueIdToDelete = cueItem.cueId;
+          }
+        } else if (leftActiveTab === 'pipeline') {
+          const savedItem = savedEvents.find(s => s.eventId === itemId);
+          if (savedItem) {
+            itemToTransfer = savedItem;
+            eventIdToDelete = savedItem.eventId;
+            const scanInList = scannedList.find(s => s.eventName.toLowerCase() === savedItem.eventName.toLowerCase());
+            if (scanInList) scanIdToDelete = scanInList.scanId;
+            const cueItem = researchCue.find(c => c.eventName.toLowerCase() === savedItem.eventName.toLowerCase());
+            if (cueItem) cueIdToDelete = cueItem.cueId;
+          }
+        }
+
+        if (itemToTransfer) {
+          const scanId = encodeURIComponent(itemToTransfer.eventName.toLowerCase().replace(/[^a-z0-9]/g, '-')).slice(0, 100);
+          const targetScanRef = doc(db, 'users', user.uid, 'projects', targetProjId, 'scans', scanId);
+
+          await setDoc(targetScanRef, {
+            eventName: itemToTransfer.eventName,
+            date: itemToTransfer.date || '',
+            location: itemToTransfer.location || '',
+            description: itemToTransfer.description || '',
+            contacts: itemToTransfer.contacts || [],
+            website: itemToTransfer.website || '',
+            logoUrl: itemToTransfer.logoUrl || '',
+            notes: itemToTransfer.notes || '',
+            actionNotes: itemToTransfer.actionNotes || [],
+            searchType: itemToTransfer.searchType || 'event',
+            yearFounded: itemToTransfer.yearFounded || '',
+            isSandbox: itemToTransfer.isSandbox || false,
+            createdAt: serverTimestamp()
+          }, { merge: true });
+
+          if (eventIdToDelete) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', eventIdToDelete));
+          }
+          if (scanIdToDelete) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'scans', scanIdToDelete));
+          }
+          if (cueIdToDelete) {
+            await deleteDoc(doc(db, 'users', user.uid, 'projects', activeProjectId, 'research_cue', cueIdToDelete));
+          }
+        }
+      }
+      setSelectedListItems([]);
+      setListSelectMode(false);
+    } catch (e) {
+      console.error(e);
+      alert("Error transferring items");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLinkedInCurrentAndFindMore = async () => {
+    if (!result) return;
+
+    setIsVerifyingLinkedIn(true);
+    setVerifyStatusMessage("Step 1/2: Verifying current contacts via LinkedIn matches & LinkUp API...");
+
+    let currentBaselineContacts = result.contacts || [];
+
+    try {
+      if (currentBaselineContacts.length > 0) {
+        const response = await fetch('/api/contacts-enrich', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            contacts: currentBaselineContacts,
+            companyName: result.eventName
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Enrichment failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        if (data && data.contacts) {
+          currentBaselineContacts = data.contacts;
+
+          const updatedResult = {
+            ...result,
+            contacts: currentBaselineContacts
+          };
+          setResult(updatedResult);
+
+          if (multipleResults.length > 0) {
+            const updatedMultiple = multipleResults.map((item, idx) => {
+              if (idx === currentResultIndex || item.eventName === result.eventName) {
+                return { ...item, contacts: currentBaselineContacts };
+              }
+              return item;
+            });
+            setMultipleResults(updatedMultiple);
+          }
+
+          const evId = (result as any).eventId;
+          if (evId && user && activeProjectId) {
+            try {
+              const eventRef = doc(db, 'users', user.uid, 'projects', activeProjectId, 'events', evId);
+              await setDoc(eventRef, {
+                contacts: currentBaselineContacts
+              }, { merge: true });
+            } catch (err) {
+              console.error("Failed to update contacts on saved event:", err);
+            }
+          }
+        }
+      }
+
+      setVerifyStatusMessage("Step 2/2: Searching LinkedIn & social indexes for additional key contacts...");
+      setIsFindingMore(true);
+
+      const existingNames = currentBaselineContacts.map(c => c.name).filter(Boolean);
+
+      const response = await fetch('/api/find-more-contacts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          companyName: result.eventName,
+          existingNames,
+          searchType: result.searchType || 'event'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to find more contacts: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && data.contacts && Array.isArray(data.contacts)) {
+        const newContacts = data.contacts;
+        const processed: ImportModalContact[] = [];
+
+        newContacts.forEach((nc: any) => {
+          if (!nc.name) return;
+
+          const existing = currentBaselineContacts.find(
+            (cc) => cc.name && cc.name.toLowerCase().trim() === nc.name.toLowerCase().trim()
+          );
+
+          if (existing) {
+            const enrichedFields: string[] = [];
+            if (!existing.email && nc.email) enrichedFields.push("email");
+            if (!existing.phone && nc.phone) enrichedFields.push("phone");
+            if (!existing.social && nc.social) enrichedFields.push("social");
+
+            if (enrichedFields.length > 0) {
+              processed.push({
+                role: nc.role || existing.role || 'Staff',
+                name: existing.name,
+                email: nc.email || existing.email || '',
+                phone: nc.phone || existing.phone || '',
+                social: nc.social || existing.social || '',
+                selected: true,
+                isNew: false,
+                enrichedFields
+              });
+            }
+          } else {
+            processed.push({
+              role: nc.role || 'Staff',
+              name: nc.name,
+              email: nc.email || '',
+              phone: nc.phone || '',
+              social: nc.social || '',
+              selected: true,
+              isNew: true
+            });
+          }
+        });
+
+        if (processed.length > 0) {
+          setImportModalContacts(processed);
+          setImportModalSource('findMore');
+          setIsImportModalOpen(true);
+          setVerifyStatusMessage("Current & Find More Search Complete! Ready to preview results.");
+        } else {
+          setVerifyStatusMessage("Current & Find More Search Complete! No additional contacts found.");
+          setTimeout(() => setVerifyStatusMessage(null), 5000);
+        }
+      }
+    } catch (err: any) {
+      console.error("LinkedIn Current & Find More error:", err);
+      setVerifyStatusMessage(`Search error: ${err.message || 'An error occurred during query'}`);
+      setTimeout(() => setVerifyStatusMessage(null), 6000);
+    } finally {
+      setIsVerifyingLinkedIn(false);
+      setIsFindingMore(false);
+    }
+  };
 
   const handleLinkedInVerify = async () => {
     if (!result || !result.contacts || result.contacts.length === 0) {
@@ -2249,9 +2583,24 @@ Pro Event Research Team`;
       <aside className="w-72 flex flex-col p-5 glass border-r shrink-0 rounded-2xl h-full overflow-hidden">
         <div className="flex-1 flex flex-col min-h-0 space-y-4 overflow-y-auto custom-scrollbar pr-1 select-text">
           {/* List Editor Subtitle */}
-          <div className="flex items-center gap-2 px-1 shrink-0">
-            <Edit3 className="h-4 w-4 text-primary" />
-            <h4 className="text-xs font-bold text-white uppercase tracking-widest">List Editor</h4>
+          <div className="flex items-center justify-between px-1 shrink-0">
+            <div className="flex items-center gap-2">
+              <Edit3 className="h-4 w-4 text-primary" />
+              <h4 className="text-xs font-bold text-white uppercase tracking-widest">List Editor</h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const nextVal = !listSelectMode;
+                setListSelectMode(nextVal);
+                if (!nextVal) {
+                  setSelectedListItems([]);
+                }
+              }}
+              className="text-[10px] text-primary hover:text-secondary font-bold font-mono tracking-wide uppercase transition-all cursor-pointer hover:underline"
+            >
+              {listSelectMode ? "Cancel Select" : "Select from list"}
+            </button>
           </div>
 
           {/* Navigation Tabs */}
@@ -2318,6 +2667,96 @@ Pro Event Research Team`;
             </button>
           </div>
 
+          {/* List Editor Selection Active Bar */}
+          {listSelectMode && (
+            <div className="shrink-0 p-3 bg-zinc-950/80 border border-white/10 rounded-2xl flex flex-col gap-2.5 shadow-inner">
+              <div className="flex items-center justify-between text-[10px] font-bold">
+                <span className="text-primary font-mono uppercase tracking-wider">
+                  {selectedListItems.length} Selected
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllListItems}
+                    className="text-slate-400 hover:text-white transition-all underline cursor-pointer text-[9.5px]"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-600 font-normal">|</span>
+                  <button
+                    type="button"
+                    onClick={handleDeselectAllListItems}
+                    className="text-slate-400 hover:text-white transition-all underline cursor-pointer text-[9.5px]"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Buttons Row */}
+              <div className="flex gap-2">
+                {leftActiveTab !== 'pipeline' && (
+                  <button
+                    type="button"
+                    disabled={selectedListItems.length === 0 || loading}
+                    onClick={handleBulkMoveToPipeline}
+                    className="flex-1 py-1.5 px-2 bg-gradient-to-b from-teal-500 to-teal-605 hover:from-teal-400 hover:to-teal-500 text-white font-bold rounded-xl text-[10px] transition-all disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1 shadow"
+                  >
+                    <Send className="h-3 w-3 text-white" />
+                    <span>Move to Pipeline</span>
+                  </button>
+                )}
+
+                {/* Transfer Lead Dropdown in Selection Mode */}
+                <div className="relative flex-1">
+                  <button
+                    type="button"
+                    disabled={selectedListItems.length === 0 || loading}
+                    onClick={() => setIsTransferDropdownOpen(!isTransferDropdownOpen)}
+                    className="w-full py-1.5 px-2 bg-gradient-to-b from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white font-bold rounded-xl text-[10px] transition-all disabled:opacity-40 cursor-pointer flex items-center justify-center gap-1 shadow"
+                  >
+                    <RefreshCw className="h-3 w-3 animate-spin-slow text-white" />
+                    <span>Transfer Lead</span>
+                    <ChevronDown className="h-3 w-3 text-white shrink-0" />
+                  </button>
+
+                  {isTransferDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setIsTransferDropdownOpen(false)} />
+                      <div className="absolute left-0 mt-1.5 w-52 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-1 z-40 flex flex-col gap-0.5 max-h-60 overflow-y-auto custom-scrollbar select-none">
+                        <div className="px-2.5 py-1 text-[8px] font-extrabold uppercase text-slate-500 tracking-wider border-b border-white/5 pb-1 mb-1">
+                          Transfer to Project:
+                        </div>
+                        {projects.filter(p => p.projectId !== activeProjectId).length === 0 ? (
+                          <div className="px-2.5 py-2 text-[10px] text-slate-500 italic text-center">
+                            No other projects found
+                          </div>
+                        ) : (
+                          projects
+                            .filter(p => p.projectId !== activeProjectId)
+                            .map(p => (
+                              <button
+                                key={p.projectId}
+                                type="button"
+                                onClick={() => {
+                                  setIsTransferDropdownOpen(false);
+                                  handleBulkTransferLeads(p.projectId, p.name);
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer truncate"
+                                title={p.name}
+                              >
+                                {p.name}
+                              </button>
+                            ))
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Active Tab Content */}
           <div className="flex-1 flex flex-col min-h-0">
             {leftActiveTab === 'cue' && (
@@ -2353,7 +2792,7 @@ Pro Event Research Team`;
 
                 <div className={cn(
                   "flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-0.5 mt-1 rounded-xl p-1 transition-all duration-300",
-                  cueSelectModeActive ? "border-2 border-primary/30 bg-[#0c0d12]/50 shadow-[0_0_15px_rgba(var(--primary-rgb),0.1)]" : ""
+                  (cueSelectModeActive || listSelectMode) ? "border-2 border-primary/30 bg-[#0c0d12]/50 shadow-[0_0_15px_rgba(var(--primary-rgb),0.1)]" : ""
                 )}>
                   {filteredCue.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-white/5 flex flex-col items-center justify-center p-4 text-center select-none h-32">
@@ -2364,6 +2803,8 @@ Pro Event Research Team`;
                       const isSelected = queryText.toLowerCase() === ev.eventName.toLowerCase();
                       const isCueItemSelected = selectedCueItems.some(c => c.cueId === ev.cueId);
                       const selectionIndex = selectedCueItems.findIndex(c => c.cueId === ev.cueId);
+                      const isListSelected = selectedListItems.includes(ev.cueId);
+                      const listSelectedIndex = selectedListItems.indexOf(ev.cueId);
                       return (
                         <div key={ev.cueId} className="relative group select-text">
                           <button
@@ -2371,6 +2812,8 @@ Pro Event Research Team`;
                             onClick={() => {
                               if (cueSelectModeActive) {
                                 handleToggleCueSelection(ev);
+                              } else if (listSelectMode) {
+                                handleToggleListItem(ev.cueId);
                               } else {
                                 setQueryText(ev.eventName);
                                 setSearchType(ev.searchType || 'event');
@@ -2398,9 +2841,9 @@ Pro Event Research Team`;
                             }}
                             className={cn(
                               "w-full text-left px-2.5 py-2 pr-12 rounded-lg text-[11px] transition-all flex items-center gap-2 border cursor-pointer select-text",
-                              cueSelectModeActive && isCueItemSelected
+                              (cueSelectModeActive && isCueItemSelected) || (listSelectMode && isListSelected)
                                 ? "bg-primary/20 border-primary text-white font-medium"
-                                : !cueSelectModeActive && isSelected 
+                                : !(cueSelectModeActive || listSelectMode) && isSelected 
                                 ? "bg-primary/15 border-primary/40 text-white font-medium" 
                                 : "bg-white/[0.01] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
                             )}
@@ -2415,10 +2858,20 @@ Pro Event Research Team`;
                                 {isCueItemSelected ? (selectionIndex + 1) : null}
                               </div>
                             )}
+                            {listSelectMode && (
+                              <div className={cn(
+                                "w-4.5 h-4.5 rounded-full border flex items-center justify-center shrink-0 transition-all text-[9.5px] font-black",
+                                isListSelected
+                                  ? "border-primary bg-primary text-slate-900"
+                                  : "border-slate-500 hover:border-slate-400 text-transparent"
+                              )}>
+                                {isListSelected ? (listSelectedIndex + 1) : null}
+                              </div>
+                            )}
                             <span className="truncate w-full block font-semibold select-text">{ev.eventName}</span>
                           </button>
                           
-                          {!cueSelectModeActive && (
+                          {!(cueSelectModeActive || listSelectMode) && (
                             <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all z-20">
                               <button
                                 type="button"
@@ -2462,48 +2915,68 @@ Pro Event Research Team`;
                         <button
                           type="button"
                           onClick={() => {
-                            setResult(ev);
-                            setQueryText(ev.eventName);
-                            setSearchType(ev.searchType || 'event');
+                            if (listSelectMode) {
+                              handleToggleListItem(ev.scanId);
+                            } else {
+                              setResult(ev);
+                              setQueryText(ev.eventName);
+                              setSearchType(ev.searchType || 'event');
+                            }
                           }}
                           className={cn(
-                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
-                            isSelected 
+                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex items-center gap-2 border cursor-pointer select-text",
+                            listSelectMode && selectedListItems.includes(ev.scanId)
+                              ? "bg-primary/20 border-primary text-white font-medium"
+                              : !listSelectMode && isSelected 
                               ? "bg-primary/10 border-primary/30 text-white font-medium" 
                               : "bg-white/[0.02] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
                           )}
                         >
-                          <div className="flex items-center justify-between gap-1.5 w-full">
-                            <span className={cn(
-                              "truncate font-semibold select-text",
-                              isInPipeline ? "text-slate-500 font-normal" : "text-white"
+                          {listSelectMode && (
+                            <div className={cn(
+                              "w-4.5 h-4.5 rounded-full border flex items-center justify-center shrink-0 transition-all text-[9.5px] font-black",
+                              selectedListItems.includes(ev.scanId)
+                                ? "border-primary bg-primary text-slate-900"
+                                : "border-slate-500 hover:border-slate-400 text-transparent"
                             )}>
-                              {ev.eventName}
+                              {selectedListItems.includes(ev.scanId) ? (selectedListItems.indexOf(ev.scanId) + 1) : null}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <div className="flex items-center justify-between gap-1.5 w-full">
+                              <span className={cn(
+                                "truncate font-semibold select-text",
+                                isInPipeline ? "text-slate-500 font-normal" : "text-white"
+                              )}>
+                                {ev.eventName}
+                              </span>
+                              {isInPipeline && (
+                                <span className="text-[8.5px] text-slate-500 shrink-0 font-medium italic">
+                                  in pipeline
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[9px] text-slate-500 truncate w-full block select-text">
+                              {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
                             </span>
-                            {isInPipeline && (
-                              <span className="text-[8.5px] text-slate-500 shrink-0 font-medium italic">
-                                in pipeline
+                            {ev.isSandbox && (
+                              <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
+                                ⚠️ Sandbox Test
                               </span>
                             )}
                           </div>
-                          <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
-                          </span>
-                          {ev.isSandbox && (
-                            <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
-                              ⚠️ Sandbox Test
-                            </span>
-                          )}
                         </button>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => handleDeleteScannedEvent(ev.scanId, e)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
-                          title="Delete scan"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        {!listSelectMode && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => handleDeleteScannedEvent(ev.scanId, e)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
+                            title="Delete scan"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                     );
                   })
@@ -2526,36 +2999,56 @@ Pro Event Research Team`;
                         <button
                           type="button"
                           onClick={() => {
-                            setResult(ev);
-                            setQueryText(ev.eventName);
-                            setSearchType(ev.searchType || 'event');
+                            if (listSelectMode) {
+                              handleToggleListItem(ev.eventId);
+                            } else {
+                              setResult(ev);
+                              setQueryText(ev.eventName);
+                              setSearchType(ev.searchType || 'event');
+                            }
                           }}
                           className={cn(
-                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex flex-col gap-0.5 border cursor-pointer select-text",
-                            isSelected 
+                            "w-full text-left px-2.5 py-2 pr-8 rounded-lg text-xs transition-all flex items-center gap-2 border cursor-pointer select-text",
+                            listSelectMode && selectedListItems.includes(ev.eventId)
+                              ? "bg-primary/20 border-primary text-white font-medium"
+                              : !listSelectMode && isSelected 
                               ? "bg-primary/10 border-primary/30 text-white font-medium" 
                               : "bg-white/[0.02] border-white/5 text-slate-400 hover:text-slate-200 hover:bg-white/5 hover:border-white/10"
                           )}
                         >
-                          <span className="truncate w-full block font-semibold text-white select-text">{ev.eventName}</span>
-                          <span className="text-[9px] text-slate-500 truncate w-full block select-text">
-                            {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
-                          </span>
-                          {ev.isSandbox && (
-                            <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
-                              ⚠️ Sandbox Test
-                            </span>
+                          {listSelectMode && (
+                            <div className={cn(
+                              "w-4.5 h-4.5 rounded-full border flex items-center justify-center shrink-0 transition-all text-[9.5px] font-black",
+                              selectedListItems.includes(ev.eventId)
+                                ? "border-primary bg-primary text-slate-900"
+                                : "border-slate-500 hover:border-slate-400 text-transparent"
+                            )}>
+                              {selectedListItems.includes(ev.eventId) ? (selectedListItems.indexOf(ev.eventId) + 1) : null}
+                            </div>
                           )}
+                          <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <span className="truncate w-full block font-semibold text-white select-text">{ev.eventName}</span>
+                            <span className="text-[9px] text-slate-500 truncate w-full block select-text">
+                              {ev.searchType === 'vendor' ? `HQ: ${ev.location} • ${formatDate(ev.date)}` : `${ev.location} • ${formatDate(ev.date)}`}
+                            </span>
+                            {ev.isSandbox && (
+                              <span className="inline-flex items-center gap-1 mt-1 text-[8px] text-amber-400 font-bold uppercase tracking-wider bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded self-start select-none">
+                                ⚠️ Sandbox Test
+                              </span>
+                            )}
+                          </div>
                         </button>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => handleDeleteSavedEvent(ev.eventId, e)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
-                          title="Remove from pipeline"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                        {!listSelectMode && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => handleDeleteSavedEvent(ev.eventId, e)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded border border-red-500/20 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-20"
+                            title="Remove from pipeline"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                     );
                   })
@@ -3103,27 +3596,37 @@ Pro Event Research Team`;
                                 >
                                   Single Contacts
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsToolDropdownOpen(false);
-                                    handleLinkedInVerify();
-                                  }}
-                                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                                >
-                                  All Contacts
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsToolDropdownOpen(false);
-                                    handleFindMoreContacts();
-                                  }}
-                                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
-                                >
-                                  Find More Contacts
-                                </button>
-                              </div>
+                                 <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsToolDropdownOpen(false);
+                                      handleLinkedInVerify();
+                                    }}
+                                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                  >
+                                    Current Contacts
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsToolDropdownOpen(false);
+                                      handleFindMoreContacts();
+                                    }}
+                                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                  >
+                                    Find More Contacts
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsToolDropdownOpen(false);
+                                      handleLinkedInCurrentAndFindMore();
+                                    }}
+                                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:text-white hover:bg-white/5 transition-all cursor-pointer border-t border-white/5 pt-1.5 mt-0.5"
+                                  >
+                                    Current & Find More
+                                  </button>
+                                </div>
                             </>
                           )}
                         </div>
@@ -3134,13 +3637,21 @@ Pro Event Research Team`;
                 </div>
 
                 {verifyStatusMessage && (
-                  <div className="mb-3.5 p-3 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between text-xs text-slate-200 transition-all duration-300">
+                  <div className={cn(
+                    "mb-3.5 p-3 rounded-xl flex items-center justify-between text-xs text-slate-200 transition-all duration-300 border",
+                    (isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl)
+                      ? "bg-orange-500/10 border-orange-500/40 shadow-[0_0_20px_rgba(249,115,22,0.45)]"
+                      : "bg-primary/10 border-primary/20"
+                  )}>
                     <div className="flex items-center gap-2.5">
                       <span className="relative flex h-2 w-2 shrink-0">
                         {isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl ? (
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-500 opacity-75"></span>
                         ) : null}
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary animate-pulse"></span>
+                        <span className={cn(
+                          "relative inline-flex rounded-full h-2 w-2 animate-pulse",
+                          (isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl) ? "bg-orange-500" : "bg-primary"
+                        )}></span>
                       </span>
                       <span className="font-medium">{verifyStatusMessage}</span>
                     </div>
