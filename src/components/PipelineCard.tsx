@@ -312,12 +312,43 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
   const isAdmin = profile?.role === 'admin';
   // Templates are read-only here — reps select and send; management lives in the
   // admin-only Templates tab.
-  const { templates } = useTemplates(user?.uid, isAdmin);
+  const { templates, createTemplate, deleteTemplate, canDelete } = useTemplates(user?.uid, isAdmin);
   // Per-session cache of generated copy variations + rotation index, keyed by
   // template id. Kept out of Firestore since it's ephemeral, per-browser state.
   const [variationsCache, setVariationsCache] = useState<Record<string, { variations: string[]; index: number }>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [isTemplateMenuOpen, setIsTemplateMenuOpen] = useState(false);
+  const [isSavingTemplateMode, setIsSavingTemplateMode] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+
+  const handleConfirmSaveTemplate = async () => {
+    if (!newTemplateName.trim()) {
+      alert("Please enter a template name.");
+      return;
+    }
+    if (!emailText.trim()) {
+      alert("Please enter some text in the composer to save as a template.");
+      return;
+    }
+
+    try {
+      const newId = await createTemplate(
+        newTemplateName.trim(),
+        emailSubject || "Intro",
+        emailText,
+        false, // shareWithAll = false for personal templates
+        profile?.displayName || user?.email || "Representative"
+      );
+      if (newId) {
+        setSelectedTemplateId(newId);
+      }
+      setIsSavingTemplateMode(false);
+      setNewTemplateName("");
+    } catch (e) {
+      console.error("Failed to save template:", e);
+      alert("Failed to save template");
+    }
+  };
   const [isContactSelectorOpen, setIsContactSelectorOpen] = useState(false);
   const [selectedComposeContact, setSelectedComposeContact] = useState<any>(null);
   const [isMailClientSelectorOpen, setIsMailClientSelectorOpen] = useState(false);
@@ -1037,7 +1068,7 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                           className="fixed inset-0 z-40"
                           onClick={() => setIsTemplateMenuOpen(false)}
                         />
-                        <div className="absolute top-full left-0 mt-1 w-[200px] bg-[#0c101a] border border-white/10 rounded-lg shadow-2xl py-1 z-50 max-h-[180px] overflow-y-auto custom-scrollbar">
+                        <div className="absolute top-full left-0 mt-1 w-[220px] bg-[#0c101a] border border-white/10 rounded-lg shadow-2xl py-1 z-50 max-h-[180px] overflow-y-auto custom-scrollbar">
                           {templates.length === 0 ? (
                             <div className="px-3 py-2 text-[8px] text-slate-450 italic">
                               No templates available.
@@ -1061,6 +1092,32 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                                     <span className="text-[7px] uppercase tracking-wider font-bold text-slate-400 bg-white/5 border border-white/10 rounded px-1 py-px shrink-0">Default</span>
                                   )}
                                 </span>
+
+                                {canDelete(tpl) && (
+                                  <button
+                                    type="button"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (confirm(`Are you sure you want to delete the template "${tpl.name}"?`)) {
+                                        try {
+                                          await deleteTemplate(tpl);
+                                          if (selectedTemplateId === tpl.id) {
+                                            setSelectedTemplateId("");
+                                            setEmailText("");
+                                            setEmailSubject("");
+                                          }
+                                        } catch (err) {
+                                          console.error("Failed to delete template:", err);
+                                          alert("Failed to delete template");
+                                        }
+                                      }
+                                    }}
+                                    className="p-1 hover:bg-red-500/10 text-red-500 hover:text-red-400 rounded cursor-pointer transition-all shrink-0 font-bold ml-2 text-[10px]"
+                                    title="Delete Template"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
                               </div>
                             ))
                           )}
@@ -1069,16 +1126,56 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                     )}
                   </div>
 
+                  {/* Save As Template actions */}
+                  <div className="flex items-center gap-1.5">
+                    {isSavingTemplateMode ? (
+                      <div className="flex items-center bg-black/60 border border-white/10 rounded px-1.5 py-0.5 gap-1.5 min-w-[180px]">
+                        <input
+                          type="text"
+                          placeholder="Template Name..."
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                          className="bg-transparent border-none text-[9px] text-white focus:outline-none w-[90px] font-sans"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleConfirmSaveTemplate}
+                          className="px-2 py-0.5 bg-primary hover:bg-secondary text-slate-900 font-bold rounded text-[8px] cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsSavingTemplateMode(false);
+                            setNewTemplateName("");
+                          }}
+                          className="px-1.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-400 rounded text-[8px] cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsSavingTemplateMode(true)}
+                        className="px-2.5 py-0.5 bg-white/5 hover:bg-white/10 text-slate-350 border border-white/10 rounded text-[9.5px] font-bold cursor-pointer transition-all hover:text-white"
+                      >
+                        Save As Template
+                      </button>
+                    )}
+                  </div>
+
                 </div>
 
-                {/* Subject line (read-only, filled from the template) */}
+                {/* Subject line (editable, pre-filled from the template) */}
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[9px] font-mono uppercase tracking-wider font-bold text-slate-500 shrink-0">Subject:</span>
                   <input
                     value={emailSubject}
-                    readOnly
-                    placeholder="Filled from the selected template"
-                    className="flex-1 bg-black/50 border border-white/5 rounded px-2.5 py-1 text-xs text-slate-200 placeholder-slate-600 focus:outline-none select-text cursor-default"
+                    onChange={e => setEmailSubject(e.target.value)}
+                    placeholder="Subject line..."
+                    className="flex-1 bg-black/50 border border-white/5 rounded px-2.5 py-1 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary/40 select-text"
                   />
                   <button
                     type="button"
@@ -1093,9 +1190,9 @@ const PipelineCard: React.FC<PipelineCardProps> = ({
                 <div className="relative select-text flex-grow flex flex-col min-h-[180px] md:min-h-[220px]">
                   <textarea
                     value={emailText}
-                    readOnly
-                    placeholder="Select a template and a recipient above — it will auto-fill here, ready to copy and send. Templates are managed by admins in the Templates tab."
-                    className="w-full flex-grow bg-black/50 border border-white/5 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none h-full custom-scrollbar font-sans select-text leading-relaxed resize-none scrollbar-thin cursor-default"
+                    onChange={e => setEmailText(e.target.value)}
+                    placeholder="Select a template and a recipient above — it will auto-fill here, ready to edit, copy and send."
+                    className="w-full flex-grow bg-black/50 border border-white/5 rounded-lg p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-primary/40 h-full custom-scrollbar font-sans select-text leading-relaxed resize-none scrollbar-thin"
                   />
                 </div>
 
