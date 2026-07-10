@@ -702,7 +702,10 @@ async function simulateScrapeWithGemini(url: string, companyName: string): Promi
   const prompt = `Research public contact information, executives, organizers, or key representatives for "${companyName || url}" (website: ${url}).
   Specifically, look up public emails, phone numbers, and LinkedIn profiles.
   
-  Return exactly 3 verified or highly likely key contacts in JSON format matching the schema:
+  Identify and return any actual public key contacts in JSON format matching the schema below.
+  Only return real, verified contact info that exists. Do not hallucinate or invent fake names/emails if they are not publicly available. If no contacts are found, return an empty array for "contacts".
+  
+  Schema:
   - contacts: array of objects with fields "role", "name", "email", "phone", "social" (LinkedIn URL).`;
 
   try {
@@ -739,23 +742,7 @@ async function simulateScrapeWithGemini(url: string, companyName: string): Promi
     return result.contacts || [];
   } catch (err: any) {
     console.error("Gemini Scrape Simulation failed:", err);
-    const domain = url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] || "example.com";
-    return [
-      {
-        role: "Event Coordinator",
-        name: `Sarah Jenkins`,
-        email: `sarah.j@${domain}`,
-        phone: "+1 (555) 019-2831",
-        social: `https://linkedin.com/in/sarah-jenkins-${domain.split('.')[0]}`
-      },
-      {
-        role: "Director of Partnerships",
-        name: `Michael Chang`,
-        email: `mchang@${domain}`,
-        phone: "+1 (555) 019-4920",
-        social: `https://linkedin.com/in/michael-chang-${domain.split('.')[0]}`
-      }
-    ];
+    throw err;
   }
 }
 
