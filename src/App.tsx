@@ -12,6 +12,8 @@ import LeaderboardMode from '@/src/components/LeaderboardMode';
 import { motion } from 'motion/react';
 import { LogIn, Zap } from 'lucide-react';
 import { signInWithGoogle } from '@/src/lib/firebase';
+// @ts-ignore
+import logo from '@/src/logo.png';
 import { cn } from '@/src/lib/utils';
 
 const AppContent = () => {
@@ -39,11 +41,9 @@ const AppContent = () => {
           className="glass max-w-md w-full p-8 rounded-3xl text-center glow-primary"
         >
           <div className="flex justify-center mb-6">
-            <div className="p-4 bg-primary/10 rounded-2xl">
-              <Zap className="h-12 w-12 text-primary" />
-            </div>
+            <img src={logo} alt="Druid Events Research Pipeline" className="h-16 w-auto object-contain" />
           </div>
-          <h1 className="text-3xl font-bold mb-2 tracking-tight text-white">Pro Event Research Pipeline</h1>
+          <h1 className="text-3xl font-bold mb-2 tracking-tight text-white">Druid Events Research Pipeline</h1>
           <p className="text-gray-400 mb-8">AI-powered event intelligence and sales pipeline acceleration.</p>
           <button 
             onClick={signInWithGoogle}
@@ -66,7 +66,7 @@ const AppContent = () => {
         setActiveProjectId={setActiveProjectId}
       />
       
-      <main className="flex-1 overflow-hidden relative pt-16">
+      <main className="flex-1 overflow-hidden relative pt-24">
         <div className="h-full w-full max-w-7xl mx-auto p-6 overflow-hidden flex flex-col relative">
           <div className={cn(
             "flex-1 overflow-auto custom-scrollbar flex flex-col transition-all duration-300 absolute inset-6",
