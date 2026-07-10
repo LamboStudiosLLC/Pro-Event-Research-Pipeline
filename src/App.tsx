@@ -66,7 +66,7 @@ const AppContent = () => {
         setActiveProjectId={setActiveProjectId}
       />
       
-      <main className="flex-1 overflow-hidden relative pt-16">
+      <main className="flex-1 overflow-hidden relative pt-24">
         <div className="h-full w-full max-w-7xl mx-auto p-6 overflow-hidden flex flex-col relative">
           <div className={cn(
             "flex-1 overflow-auto custom-scrollbar flex flex-col transition-all duration-300 absolute inset-6",

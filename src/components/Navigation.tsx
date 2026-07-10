@@ -139,10 +139,10 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
   const activeProject = projects.find(p => p.projectId === activeProjectId);
 
   return (
-    <nav className="h-16 flex items-center justify-between px-6 border-b border-white/10 glass shrink-0 fixed top-0 left-0 right-0 z-50">
+    <nav className="h-24 flex items-center justify-between px-6 border-b border-white/10 glass shrink-0 fixed top-0 left-0 right-0 z-50">
       <div className="flex items-center gap-8 h-full">
-        <div className="flex items-center gap-3 py-1">
-          <img src={logo} alt="Druid Events Research Pipeline" className="h-9 w-auto object-contain" />
+        <div className="flex items-center gap-3 py-0">
+          <img src={logo} alt="Druid Events Research Pipeline" className="h-[81px] w-auto object-contain" />
         </div>
 
         <div className="flex items-center bg-zinc-900/80 rounded-full p-1 border border-white/5">
