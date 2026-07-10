@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+// @ts-ignore
+import logo from '@/src/logo.png';
 
 interface NavigationProps {
   mode: Mode;
@@ -139,9 +141,8 @@ const Navigation: React.FC<NavigationProps> = ({ mode, setMode, activeProjectId,
   return (
     <nav className="h-16 flex items-center justify-between px-6 border-b border-white/10 glass shrink-0 fixed top-0 left-0 right-0 z-50">
       <div className="flex items-center gap-8 h-full">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center font-bold text-slate-900">P</div>
-          <h1 className="text-lg font-semibold tracking-tight text-white">Pro Event Research <span className="text-primary">Pipeline</span></h1>
+        <div className="flex items-center gap-3 py-1">
+          <img src={logo} alt="Druid Events Research Pipeline" className="h-9 w-auto object-contain" />
         </div>
 
         <div className="flex items-center bg-zinc-900/80 rounded-full p-1 border border-white/5">
