@@ -349,6 +349,8 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
   const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
   const [isFindingMore, setIsFindingMore] = useState(false);
   const [isScrapingFirecrawl, setIsScrapingFirecrawl] = useState(false);
+  const [isScrapeDropdownOpen, setIsScrapeDropdownOpen] = useState(false);
+  const [customScrapeUrl, setCustomScrapeUrl] = useState('');
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importModalContacts, setImportModalContacts] = useState<ImportModalContact[]>([]);
@@ -973,14 +975,15 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
     }
   };
 
-  const handleFirecrawlScrape = async () => {
-    if (!result || !result.website) {
+  const handleFirecrawlScrape = async (overrideUrl?: string) => {
+    const urlToScrape = overrideUrl || (result ? result.website : "");
+    if (!urlToScrape) {
       alert("No website URL available to scrape.");
       return;
     }
 
     setIsScrapingFirecrawl(true);
-    setVerifyStatusMessage(`Crawling & extracting contacts from ${result.website} via Firecrawl...`);
+    setVerifyStatusMessage(`Crawling & extracting contacts from ${urlToScrape} via Firecrawl...`);
 
     try {
       const response = await fetch('/api/firecrawl-scrape', {
@@ -989,8 +992,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          url: result.website,
-          companyName: result.eventName
+          url: urlToScrape,
+          companyName: result?.eventName || "",
+          officialWebsite: result?.website || ""
         })
       });
 
@@ -1000,6 +1004,9 @@ const ResearchMode: React.FC<ResearchModeProps> = ({ activeProjectId, setActiveP
 
       const data = await response.json();
       if (data && data.contacts && Array.isArray(data.contacts)) {
+        if (data.warnings && data.warnings.length > 0) {
+          alert(`⚠️ Email Validation Warning:\n\nRemoved ${data.warnings.length} email address(es) that belonged to domains outside of the event/vendor website (e.g., random or government domains).`);
+        }
         const scraped = data.contacts;
         const currentContacts = result.contacts || [];
         const processed: ImportModalContact[] = [];
@@ -3558,15 +3565,58 @@ Pro Event Research Team`;
                       </div>
                     ) : (
                       <>
-                        <button
-                          type="button"
-                          onClick={handleFirecrawlScrape}
-                          disabled={isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl || !result || !result.website}
-                          className="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-amber-500/25 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 active:scale-[0.98] cursor-pointer"
-                        >
-                          <Flame className="h-3 w-3 shrink-0 text-amber-500 animate-pulse" />
-                          <span>{isScrapingFirecrawl ? "Scraping..." : "Site Scrape+"}</span>
-                        </button>
+                        <div className="relative inline-flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => handleFirecrawlScrape()}
+                            disabled={isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl || !result || !result.website}
+                            className="px-3 py-1.5 rounded-l-lg text-[10px] font-bold tracking-wider transition-all uppercase flex items-center gap-1.5 border border-amber-500/25 border-r-0 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 active:scale-[0.98] cursor-pointer"
+                          >
+                            <Flame className="h-3 w-3 shrink-0 text-amber-500 animate-pulse" />
+                            <span>{isScrapingFirecrawl ? "Scraping..." : "Site Scrape+"}</span>
+                          </button>
+                          
+                          <button
+                            type="button"
+                            onClick={() => setIsScrapeDropdownOpen(!isScrapeDropdownOpen)}
+                            disabled={isVerifyingLinkedIn || isFindingMore || isScrapingFirecrawl || !result}
+                            className="px-2 py-1.5 rounded-r-lg text-[10px] font-bold tracking-wider transition-all border border-amber-500/25 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 active:scale-[0.98] cursor-pointer border-l-white/10 flex items-center justify-center"
+                          >
+                            <ChevronDown className="h-3 w-3 text-amber-500 shrink-0 transition-transform duration-200" style={{ transform: isScrapeDropdownOpen ? 'rotate(180deg)' : 'rotate(0)' }} />
+                          </button>
+
+                          {isScrapeDropdownOpen && (
+                            <>
+                              <div className="fixed inset-0 z-30" onClick={() => setIsScrapeDropdownOpen(false)} />
+                              <div className="absolute left-0 mt-1 top-full w-64 rounded-xl border border-white/10 bg-[#0e0f14] shadow-2xl p-3 z-40 flex flex-col gap-2">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scrape Custom URL</div>
+                                <div className="flex gap-1.5 items-center">
+                                  <input
+                                    type="url"
+                                    placeholder="https://example.com/about"
+                                    value={customScrapeUrl}
+                                    onChange={(e) => setCustomScrapeUrl(e.target.value)}
+                                    className="flex-1 bg-zinc-950 border border-white/10 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!customScrapeUrl) return;
+                                      handleFirecrawlScrape(customScrapeUrl);
+                                      setIsScrapeDropdownOpen(false);
+                                      setCustomScrapeUrl('');
+                                    }}
+                                    disabled={!customScrapeUrl}
+                                    className="p-1.5 rounded-lg border border-amber-500/20 bg-amber-500/10 hover:bg-amber-500/25 text-amber-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                    title="Run Custom Scrape"
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
 
                         <div className="relative inline-block">
                           <button
