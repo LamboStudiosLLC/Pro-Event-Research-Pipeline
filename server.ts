@@ -746,9 +746,83 @@ async function simulateScrapeWithGemini(url: string, companyName: string): Promi
   }
 }
 
+const ALLOWED_PUBLIC_DOMAINS = new Set([
+  "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
+  "aol.com", "mail.com", "zoho.com", "protonmail.com", "proton.me", "live.com"
+]);
+
+const SOCIAL_AND_PLATFORM_DOMAINS = new Set([
+  "twitter.com", "x.com", "linkedin.com", "facebook.com", "instagram.com", 
+  "youtube.com", "pinterest.com", "tiktok.com", "github.com", "medium.com"
+]);
+
+function getBaseDomain(urlStr: string): string {
+  try {
+    let parsedUrl = urlStr.trim();
+    if (!parsedUrl) return "";
+    if (!/^https?:\/\//i.test(parsedUrl)) {
+      parsedUrl = 'http://' + parsedUrl;
+    }
+    const hostname = new URL(parsedUrl).hostname.toLowerCase();
+    return hostname.replace(/^www\./, '');
+  } catch (e) {
+    return "";
+  }
+}
+
+function isEmailDomainValid(email: string, validDomains: string[]): boolean {
+  if (!email) return true;
+  const parts = email.trim().toLowerCase().split('@');
+  if (parts.length !== 2) return false;
+  const emailDomain = parts[1];
+
+  if (ALLOWED_PUBLIC_DOMAINS.has(emailDomain)) {
+    return true;
+  }
+
+  for (const validDomain of validDomains) {
+    if (!validDomain) continue;
+    if (emailDomain === validDomain || emailDomain.endsWith('.' + validDomain)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function cleanAndValidateContacts(contacts: any[], url: string, officialWebsite?: string): { contacts: any[], warnings: string[] } {
+  const validDomains: string[] = [];
+  const defaultDomain = getBaseDomain(url);
+  if (defaultDomain && !SOCIAL_AND_PLATFORM_DOMAINS.has(defaultDomain)) {
+    validDomains.push(defaultDomain);
+  }
+  const officialDomain = getBaseDomain(officialWebsite || "");
+  if (officialDomain && !SOCIAL_AND_PLATFORM_DOMAINS.has(officialDomain) && !validDomains.includes(officialDomain)) {
+    validDomains.push(officialDomain);
+  }
+
+  const warnings: string[] = [];
+  const cleaned = contacts.map((c: any) => {
+    let email = c.email || "";
+    if (email && validDomains.length > 0 && !isEmailDomainValid(email, validDomains)) {
+      warnings.push(`Filtered out invalid email '${email}' (domain mismatch).`);
+      email = "";
+    }
+    return {
+      role: c.role || "",
+      name: c.name || "",
+      email: email,
+      phone: c.phone || "",
+      social: c.social || ""
+    };
+  }).filter(c => c.name);
+
+  return { contacts: cleaned, warnings };
+}
+
 // Firecrawl Scrape API
 app.post("/api/firecrawl-scrape", async (req, res) => {
-  const { url, companyName } = req.body || {};
+  const { url, companyName, officialWebsite } = req.body || {};
   if (!url) {
     return res.status(400).json({ error: "URL is required" });
   }
@@ -810,20 +884,14 @@ app.post("/api/firecrawl-scrape", async (req, res) => {
       contacts = await simulateScrapeWithGemini(url, companyName);
     }
 
-    const cleanedContacts = contacts.map((c: any) => ({
-      role: c.role || "",
-      name: c.name || "",
-      email: c.email || "",
-      phone: c.phone || "",
-      social: c.social || ""
-    })).filter(c => c.name);
-
-    res.json({ contacts: cleanedContacts });
+    const { contacts: cleanedContacts, warnings } = cleanAndValidateContacts(contacts, url, officialWebsite);
+    res.json({ contacts: cleanedContacts, warnings });
   } catch (error: any) {
     console.error("Firecrawl Scrape API overall error, falling back to Gemini simulation:", error);
     try {
       const fallbackContacts = await simulateScrapeWithGemini(url, companyName);
-      res.json({ contacts: fallbackContacts });
+      const { contacts: cleanedFallback, warnings } = cleanAndValidateContacts(fallbackContacts, url, officialWebsite);
+      res.json({ contacts: cleanedFallback, warnings });
     } catch (fallbackError: any) {
       res.status(500).json({ error: "Failed to scrape website", details: error.message });
     }
