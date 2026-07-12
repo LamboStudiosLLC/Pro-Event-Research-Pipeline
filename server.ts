@@ -485,7 +485,7 @@ app.post("/api/contacts-enrich", async (req, res) => {
               },
               body: JSON.stringify({
                 jsonrpc: '2.0',
-                id: Date.now(),
+                id: Math.floor(Math.random() * 1000000000),
                 method: 'tools/call',
                 params: {
                   name: 'linkupapi_enrich',
@@ -538,7 +538,7 @@ app.post("/api/contacts-enrich", async (req, res) => {
               },
               body: JSON.stringify({
                 jsonrpc: '2.0',
-                id: Date.now(),
+                id: Math.floor(Math.random() * 1000000000),
                 method: 'tools/call',
                 params: {
                   name: 'linkupapi_enrich',
